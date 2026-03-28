@@ -21,9 +21,7 @@ Then /^the project "([^"]+)" should run successfully$/ do |project_name|
 end
 
 Then /^the project "([^"]+)" should respond to http:\/\/(.+)$/ do |project_name, hostname|
-  # Configure Passenger to use the project's gemset-specific Ruby wrapper
-  run_new_ssh("sudo sed -i '/passenger_enabled/a\\    passenger_ruby /home/deploy/.rvm/wrappers/ruby-4.0.2@#{project_name}/ruby;' /etc/nginx/snippets/common.conf")
-  run_new_ssh("sudo nginx -s reload")
+  run_new_ssh("cd /tmp/bardwork/#{project_name} && bundle exec puma -p 3000 -d")
   sleep 3
   stdout, status = run_new_ssh("curl -sf -H 'Host: #{hostname}' http://localhost/")
   expect(status).to be_success, "HTTP request to #{hostname} failed:\n#{stdout}"

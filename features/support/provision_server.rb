@@ -172,13 +172,21 @@ module ProvisionServerWorld
       cat > ~/testproject/Gemfile << 'GEMFILE'
 source "https://rubygems.org"
 gem "bard", path: "/home/www/bard-src"
+gem "foreman-export-systemd_user"
 GEMFILE
+    SH
+
+    run_provision_ssh_as("www", <<~SH)
+      cat > ~/testproject/Procfile << 'PROCFILE'
+web: python3 -m http.server 3000 -d public
+PROCFILE
     SH
 
     run_provision_ssh_as("www", <<~SH)
       cat > ~/testproject/bin/setup << 'SCRIPT'
 #!/bin/bash
 bundle install --quiet
+bin/rake bootstrap
 SCRIPT
       chmod +x ~/testproject/bin/setup
     SH
@@ -187,6 +195,13 @@ SCRIPT
       cat > ~/testproject/bin/rake << 'SCRIPT'
 #!/bin/bash
 case "$1" in
+  bootstrap)
+    if [ "$RAILS_ENV" = "production" ]; then
+      app=$(basename $(pwd))
+      bundle exec foreman export systemd-user --app $app
+      systemctl --user restart $app.target
+    fi
+    ;;
   db:dump)
     echo "test data" | gzip > db/data.sql.gz
     ;;
@@ -212,6 +227,8 @@ BARDCONFIG
 
     run_provision_ssh_as("www", "echo 'ruby-3.3.4' > ~/testproject/.ruby-version")
 
+    run_provision_ssh_as("www", "echo 'hello from testproject' > ~/testproject/public/index.html")
+
     # Initialize git repo
     run_provision_ssh_as("www", <<~SH)
       cd ~/testproject && \
@@ -225,24 +242,6 @@ BARDCONFIG
     run_provision_ssh_as("www", <<~SH)
       git clone --bare ~/testproject ~/repos/testproject.git && \
       cd ~/testproject && git remote add origin ~/repos/testproject.git
-    SH
-
-    # Create a simple HTTP backend on port 3000 via systemd (survives SSH disconnect)
-    run_provision_ssh_as("www", "echo 'hello from testproject' > ~/testproject/public/index.html")
-    run_provision_ssh_as("root", <<~SH)
-      cat > /etc/systemd/system/testproject-web.service << 'UNIT'
-[Unit]
-Description=Test project web server
-
-[Service]
-ExecStart=/usr/bin/python3 -m http.server 3000 -d /home/www/testproject/public
-User=www
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-      systemctl daemon-reload
-      systemctl enable --now testproject-web
     SH
   end
 

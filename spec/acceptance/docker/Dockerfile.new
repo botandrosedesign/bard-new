@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y \
     openssh-server \
+    nginx \
     git \
     sudo \
     curl \
@@ -14,21 +15,10 @@ RUN apt-get update && \
     libsodium-dev \
     gawk \
     tzdata \
-    dirmngr \
-    gnupg \
-    apt-transport-https \
-    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install nginx + Passenger (matching bard provision)
-RUN curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key-2025.txt | \
-    gpg --dearmor > /etc/apt/trusted.gpg.d/phusion.gpg && \
-    echo "deb https://oss-binaries.phusionpassenger.com/apt/passenger jammy main" > \
-    /etc/apt/sources.list.d/passenger.list && \
-    apt-get update && \
-    apt-get install -y nginx libnginx-mod-http-passenger && \
-    rm /etc/nginx/sites-enabled/default && \
-    rm -rf /var/lib/apt/lists/*
+# Remove default nginx site
+RUN rm -f /etc/nginx/sites-enabled/default
 
 # Create deploy user with passwordless sudo
 RUN useradd -m -s /bin/bash deploy && \
@@ -36,12 +26,12 @@ RUN useradd -m -s /bin/bash deploy && \
     echo 'deploy ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Setup SSH
-RUN mkdir /var/run/sshd && \
+RUN mkdir -p /var/run/sshd && \
     mkdir -p /home/deploy/.ssh && \
     chmod 700 /home/deploy/.ssh
 
 # Copy SSH authorized key
-COPY spec/acceptance/docker/test_key.pub /home/deploy/.ssh/authorized_keys
+COPY bard-new/spec/acceptance/docker/test_key.pub /home/deploy/.ssh/authorized_keys
 RUN chown -R deploy:deploy /home/deploy/.ssh && \
     chmod 600 /home/deploy/.ssh/authorized_keys
 
@@ -57,9 +47,11 @@ RUN curl -sSL https://rvm.io/mpapis.asc | gpg --import - && \
 
 RUN bash -lc "rvm install ruby-4.0.2 && rvm use ruby-4.0.2 --default"
 
-# Copy bard source and install (build context is repo root)
-COPY --chown=deploy:deploy . /home/deploy/bard-src/
+# Install bard and bard-new gems from source
+COPY --chown=deploy:deploy bard /home/deploy/bard-src/
 RUN bash -lc "cd /home/deploy/bard-src && gem build bard.gemspec && gem install bard-*.gem"
+COPY --chown=deploy:deploy bard-new /home/deploy/bard-new-src/
+RUN bash -lc "cd /home/deploy/bard-new-src && gem build bard-new.gemspec && gem install bard-new-*.gem"
 
 # Configure git
 RUN git config --global user.email "test@example.com" && \
@@ -68,16 +60,8 @@ RUN git config --global user.email "test@example.com" && \
 
 USER root
 
-# Configure Passenger to use RVM Ruby
-RUN sed -i 's|passenger_ruby.*|passenger_ruby /home/deploy/.rvm/wrappers/default/ruby;|' \
-    /etc/nginx/conf.d/mod-http-passenger.conf && \
-    mkdir -p /var/run/passenger-instreg
-
-# Set Passenger to development mode (no production DB/secrets needed)
-RUN echo "passenger_app_env development;" > /etc/nginx/conf.d/passenger-env.conf
-
 # Start both sshd and nginx
-COPY spec/acceptance/docker/entrypoint-new.sh /entrypoint.sh
+COPY bard-new/spec/acceptance/docker/entrypoint-new.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 22
