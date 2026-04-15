@@ -3,7 +3,8 @@ require "bard/new/provision/base"
 require "bard/new/provision/masterkey"
 
 describe Bard::Provision::MasterKey do
-  let(:config) { { production: double("production") } }
+  let(:local) { double("local") }
+  let(:config) { { production: double("production"), local: local } }
   let(:ssh_url) { "user@example.com" }
   let(:provision_server) { double("provision_server") }
   let(:master_key) { Bard::Provision::MasterKey.new(config, ssh_url) }
@@ -23,9 +24,7 @@ describe Bard::Provision::MasterKey do
       it "uploads master.key if not present on server" do
         allow(provision_server).to receive(:run).with("[ -f config/master.key ]", quiet: true).and_return(false)
 
-        copy_double = double("copy")
-        expect(Bard::SSH::Copy).to receive(:new).with("config/master.key").and_return(copy_double)
-        expect(copy_double).to receive(:scp_using_local).with(:to, provision_server)
+        expect(Bard::Copy).to receive(:file).with("config/master.key", from: local, to: provision_server)
 
         master_key.call
       end
@@ -33,7 +32,7 @@ describe Bard::Provision::MasterKey do
       it "skips upload if master.key already exists on server" do
         allow(provision_server).to receive(:run).with("[ -f config/master.key ]", quiet: true).and_return(true)
 
-        expect(Bard::SSH::Copy).not_to receive(:new)
+        expect(Bard::Copy).not_to receive(:file)
 
         master_key.call
       end
@@ -45,7 +44,7 @@ describe Bard::Provision::MasterKey do
       end
 
       it "skips the upload" do
-        expect(Bard::SSH::Copy).not_to receive(:new)
+        expect(Bard::Copy).not_to receive(:file)
 
         master_key.call
       end

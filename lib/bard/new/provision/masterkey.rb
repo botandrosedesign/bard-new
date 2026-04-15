@@ -8,7 +8,7 @@ class Bard::Provision::MasterKey < Bard::Provision
     if File.exist?("config/master.key")
       if !provision_server.run "[ -f config/master.key ]", quiet: true
         print " Uploading config/master.key,"
-        Bard::SSH::Copy.new("config/master.key").scp_using_local(:to, provision_server)
+        Bard::Copy.file "config/master.key", from: config[:local], to: provision_server
       end
     end
 
