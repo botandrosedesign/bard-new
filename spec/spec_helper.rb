@@ -11,7 +11,7 @@ require "webmock/rspec"
 $LOAD_PATH.unshift File.expand_path("../../lib", __FILE__)
 require "debug/prelude"
 require "bard/cli"
-require "bard/new/plugin"
+require "bard/plugins/new"
 
 RSpec.configure do |config|
   config.filter_run focus: true
