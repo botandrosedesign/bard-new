@@ -57,7 +57,8 @@ class Bard::CLI
 
     def new_build_gem_install(gem_name, version_requirement)
       <<~SH
-        GEM_VERSION=$(gem install #{gem_name} -v "#{version_requirement}" --no-document 2>&1 | grep -oP "Successfully installed #{gem_name}-\\K[0-9.]+")
+        gem install #{gem_name} -v "#{version_requirement}" --no-document || exit 1
+        GEM_VERSION=$(gem list #{gem_name} --exact -v "#{version_requirement}" | grep -oP "#{gem_name} \\(\\K[0-9.]+" | head -1)
       SH
     end
 

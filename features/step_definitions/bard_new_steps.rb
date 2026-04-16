@@ -21,8 +21,14 @@ Then /^the project "([^"]+)" should run successfully$/ do |project_name|
 end
 
 Then /^the project "([^"]+)" should respond to http:\/\/(.+)$/ do |project_name, hostname|
-  run_new_ssh("cd /tmp/bardwork/#{project_name} && bundle exec puma -p 3000 -d")
-  sleep 3
+  Open3.capture2e(
+    "timeout", "3",
+    "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+    "-p", @new_ssh_port.to_s, "-i", new_ssh_key_path,
+    "deploy@localhost",
+    "bash -lc 'cd /tmp/bardwork/#{project_name} && setsid -f bundle exec puma -p 3000 </dev/null >/tmp/puma.log 2>&1'"
+  )
+  sleep 5
   stdout, status = run_new_ssh("curl -sf -H 'Host: #{hostname}' http://localhost/")
   expect(status).to be_success, "HTTP request to #{hostname} failed:\n#{stdout}"
   expect(stdout).to include(project_name)

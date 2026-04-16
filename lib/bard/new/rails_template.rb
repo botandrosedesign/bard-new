@@ -46,6 +46,7 @@ file "Gemfile", <<~RUBY
   gem "solid_cache"
   gem "solid_queue"
   gem "solid_cable"
+  gem "bard", github: "botandrose/bard", branch: "v2.0"
   gem "bard-rails"
   gem "sqlite3"
   gem "image_processing"
@@ -206,7 +207,7 @@ append_to_file "Rakefile", <<~'RUBY'
 RUBY
 
 after_bundle do
-  run "bard install"
+  run "bundle exec bard install"
   run "bin/setup"
-  run "bard setup"
+  run "bundle exec bard setup"
 end
