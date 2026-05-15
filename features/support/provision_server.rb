@@ -146,23 +146,6 @@ module ProvisionServerWorld
   end
 
   def setup_test_project
-    # Copy bard source to container
-    run_provision_ssh_as("root", "mkdir -p /home/www/bard-src && chown www:www /home/www/bard-src")
-
-    bard_gem_dir = File.join(ROOT, "..", "bard")
-
-    bard_tar = File.join(@test_dir, "bard-src.tar.gz")
-    system("tar czf #{bard_tar} -C #{bard_gem_dir} --exclude=.git --exclude=tmp --exclude=coverage .", out: File::NULL, err: File::NULL)
-
-    system(
-      "scp", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-      "-P", @ssh_port.to_s, "-i", provision_ssh_key_path,
-      bard_tar, "www@#{@container_ip}:/home/www/bard-src/bard-src.tar.gz",
-      out: File::NULL, err: File::NULL
-    )
-    run_provision_ssh_as("www", "cd /home/www/bard-src && tar xzf bard-src.tar.gz && rm bard-src.tar.gz")
-    FileUtils.rm_f(bard_tar)
-
     # Create test project
     run_provision_ssh_as("www", <<~'SH')
       mkdir -p ~/testproject/bin ~/testproject/db ~/testproject/public ~/testproject/config ~/testproject/log
@@ -171,7 +154,7 @@ module ProvisionServerWorld
     run_provision_ssh_as("www", <<~SH)
       cat > ~/testproject/Gemfile << 'GEMFILE'
 source "https://rubygems.org"
-gem "bard", path: "/home/www/bard-src"
+gem "bard", github: "botandrose/bard", branch: "v2.0"
 gem "foreman-export-systemd_user"
 GEMFILE
     SH

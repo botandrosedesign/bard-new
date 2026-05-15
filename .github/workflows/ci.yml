@@ -1,0 +1,42 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: [ "3.3", "3.4", "4.0" ]
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+
+      - name: Install Podman
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y podman
+          sudo nohup podman system service --time=0 tcp://127.0.0.1:8080 > /tmp/podman-service.log 2>&1 &
+          for i in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:8080/v1.40/version >/dev/null 2>&1; then
+              echo "Podman REST API ready at tcp://127.0.0.1:8080"
+              break
+            fi
+            sleep 1
+          done
+          echo "DOCKER_HOST=tcp://127.0.0.1:8080" >> $GITHUB_ENV
+
+      - name: Build test container images
+        run: |
+          sudo podman pull ubuntu:24.04
+          sudo podman build -t bard-test-provision -f spec/acceptance/docker/Dockerfile.provision spec/acceptance/docker
+          sudo podman build -t bard-test-new -f spec/acceptance/docker/Dockerfile.new .
+
+      - name: Run tests
+        run: bundle exec rake
