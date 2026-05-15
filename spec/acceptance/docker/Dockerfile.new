@@ -31,7 +31,7 @@ RUN mkdir -p /var/run/sshd && \
     chmod 700 /home/deploy/.ssh
 
 # Copy SSH authorized key
-COPY bard-new/spec/acceptance/docker/test_key.pub /home/deploy/.ssh/authorized_keys
+COPY spec/acceptance/docker/test_key.pub /home/deploy/.ssh/authorized_keys
 RUN chown -R deploy:deploy /home/deploy/.ssh && \
     chmod 600 /home/deploy/.ssh/authorized_keys
 
@@ -48,9 +48,8 @@ RUN curl -sSL https://rvm.io/mpapis.asc | gpg --import - && \
 RUN bash -lc "rvm install ruby-4.0.2 && rvm use ruby-4.0.2 --default"
 
 # Install bard and bard-new gems from source
-COPY --chown=deploy:deploy bard /home/deploy/bard-src/
-RUN bash -lc "cd /home/deploy/bard-src && gem build bard.gemspec && gem install bard-*.gem"
-COPY --chown=deploy:deploy bard-new /home/deploy/bard-new-src/
+RUN bash -lc "git clone --depth 1 --branch v2.0 https://github.com/botandrose/bard.git /home/deploy/bard-src && cd /home/deploy/bard-src && gem build bard.gemspec && gem install bard-*.gem"
+COPY --chown=deploy:deploy . /home/deploy/bard-new-src/
 RUN bash -lc "cd /home/deploy/bard-new-src && gem build bard-new.gemspec && gem install bard-new-*.gem"
 
 # Configure git
@@ -61,7 +60,7 @@ RUN git config --global user.email "test@example.com" && \
 USER root
 
 # Start both sshd and nginx
-COPY bard-new/spec/acceptance/docker/entrypoint-new.sh /entrypoint.sh
+COPY spec/acceptance/docker/entrypoint-new.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 22

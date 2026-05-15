@@ -51,9 +51,8 @@ module NewServerWorld
       return
     end
 
-    parent_dir = File.expand_path("..", ROOT)
     dockerfile = File.join(ROOT, "spec/acceptance/docker/Dockerfile.new")
-    unless system("podman build -t bard-test-new -f #{dockerfile} #{parent_dir} 2>&1")
+    unless system("podman build -t bard-test-new -f #{dockerfile} #{ROOT} 2>&1")
       raise PrerequisiteError, "Failed to build bard-test-new image"
     end
 

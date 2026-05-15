@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this gem is
 
-`bard-new` is a plugin for the `bard` CLI gem (sibling repo at `../bard`). It adds two subcommands:
+`bard-new` is a plugin for the `bard` CLI gem ([botandrose/bard](https://github.com/botandrose/bard)). It adds two subcommands:
 
 - `bard new <project-name>` — scaffolds a new Rails app using `lib/bard/new/rails_template.rb`, optionally pushes to GitHub and stages a deploy.
 - `bard provision [ssh_url]` — idempotently provisions a fresh Ubuntu 24.04 host into a production target, step by step.
@@ -23,7 +23,7 @@ Each step is a `Struct.new(:config, :ssh_url)` subclass of `Bard::Provision` (se
 Drives `rails new -m` — generates Gemfile (bard-rails, solid_*, sprockets+dartsass, importmap/turbo/stimulus, exception_notification, puma), writes `Procfile`, adds a `bootstrap` rake task that does `db:prepare` + (in production) `assets:precompile` + `foreman export systemd-user` + `systemctl --user restart`, and runs `bard install && bin/setup && bard setup` after bundle. Reads `ruby_version` and `project_name` from the current `rvm current name`.
 
 ### Test infrastructure
-Both cucumber features spin up a real **Podman** container (via `docker-api` against the podman socket) using `spec/acceptance/docker/Dockerfile.{new,provision}`, then SSH in with `spec/acceptance/docker/test_key`. The `@new` tag gives a deploy-ready Ubuntu + RVM + pre-installed bard/bard-new gems for exercising `bard new`. The `@provision` tag gives a raw-ish Ubuntu + systemd for exercising the provision steps end-to-end; the `Dockerfile.provision` build context is the **parent directory** so it can `COPY bard/ ...` from the sibling repo.
+Both cucumber features spin up a real **Podman** container (via `docker-api` against the podman socket) using `spec/acceptance/docker/Dockerfile.{new,provision}`, then SSH in with `spec/acceptance/docker/test_key`. The `@new` tag gives a deploy-ready Ubuntu + RVM + pre-installed bard/bard-new gems for exercising `bard new` — `Dockerfile.new` clones `bard` from GitHub (branch `v2.0`) during the build and `COPY`s the bard-new working tree in (build context is the repo root). The `@provision` tag gives a raw-ish Ubuntu + systemd for exercising the provision steps end-to-end (build context is just `spec/acceptance/docker/`).
 
 Coverage is written by both cucumber (`features/support/env.rb`) and rspec (`spec/spec_helper.rb`) via SimpleCov — the cucumber runs shell out through `features/support/bard-coverage`, a wrapper that starts SimpleCov before exec'ing the `bard` binary so the subprocess's line coverage is merged in.
 
@@ -44,7 +44,7 @@ bundle exec cucumber features/provision.feature    # @provision tag
 
 Cucumber runs are slow (they build and boot containers). Per global rules: **always** pipe cucumber output to a uniquely-named file in `/tmp/` and grep it, and never run the full cucumber suite speculatively.
 
-Podman must be installed and `systemctl --user start podman.socket` must succeed — the test harness auto-starts it and sets `DOCKER_HOST` to the user socket. The sibling `../bard` checkout must exist because both the Dockerfiles and the `Gemfile` (`gem "bard", path: "../bard"`) reference it.
+Podman must be installed and `systemctl --user start podman.socket` must succeed — the test harness auto-starts it and sets `DOCKER_HOST` to the user socket.
 
 ## Conventions specific to this repo
 

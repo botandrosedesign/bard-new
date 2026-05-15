@@ -1,5 +1,7 @@
-PATH
-  remote: ../bard
+GIT
+  remote: https://github.com/botandrose/bard.git
+  revision: eed2de978df9a6e26bd98c2ca1e02da5586e22a0
+  branch: v2.0
   specs:
     bard (2.0.0)
       base64

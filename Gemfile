@@ -2,7 +2,7 @@ source "http://rubygems.org"
 
 gemspec
 
-gem "bard", path: "../bard"
+gem "bard", github: "botandrose/bard", branch: "v2.0"
 
 group :test do
   gem "simplecov", require: false
