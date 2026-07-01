@@ -13,7 +13,7 @@ GIT
 PATH
   remote: .
   specs:
-    bard-new (0.1.0)
+    bard-new (0.1.1)
       bard
 
 GEM
