@@ -202,6 +202,7 @@ append_to_file "Rakefile", <<~'RUBY'
 
   task bootstrap: :environment do
     system "bin/rails db:prepare"
+    system "bin/rails restart"
     if Rails.env.production?
       system "bin/rails assets:precompile"
       app = File.basename(Dir.pwd)
