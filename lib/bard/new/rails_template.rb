@@ -175,6 +175,11 @@ insert_into_file "config/database.yml", <<~YAML, after: "database: storage/test.
     database: storage/staging.sqlite3
 YAML
 
+# give each parallel_tests worker its own sqlite file, else they collide on one db
+gsub_file "config/database.yml",
+  "database: storage/test.sqlite3",
+  'database: storage/test<%= ENV["TEST_ENV_NUMBER"] %>.sqlite3'
+
 insert_into_file "config/database.yml", <<-YAML, after: "# database: path/to/persistent/storage/production.sqlite3"
 
   cable:
