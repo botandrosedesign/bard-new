@@ -14,6 +14,7 @@ describe "bard reap" do
     allow(cli).to receive(:puts)
     allow(cli).to receive(:green) { |s| s }
     allow(cli).to receive(:red) { |s| s }
+    allow(cli).to receive(:ensure_reaper_timer)
   end
 
   describe "guard" do
@@ -28,8 +29,38 @@ describe "bard reap" do
       allow(cli).to receive(:puts)
       allow(cli).to receive(:green) { |s| s }
       allow(cli).to receive(:red) { |s| s }
+      allow(cli).to receive(:ensure_reaper_timer)
       allow(cli).to receive(:reap_candidates).and_return([])
       expect { cli.reap }.not_to raise_error
+    end
+  end
+
+  describe "self-installing timer" do
+    before { allow(cli).to receive(:reap_candidates).and_return([]) }
+
+    it "ensures its own timer on a real run" do
+      expect(cli).to receive(:ensure_reaper_timer)
+      cli.reap
+    end
+
+    it "does not touch the box on a dry run" do
+      cli = Bard::CLI.new([], "dry-run": true)
+      allow(cli).to receive(:puts)
+      allow(cli).to receive(:green) { |s| s }
+      allow(cli).to receive(:red) { |s| s }
+      allow(cli).to receive(:reap_candidates).and_return([])
+      expect(cli).not_to receive(:ensure_reaper_timer)
+      cli.reap
+    end
+
+    describe "#reaper_install_script" do
+      it "pins ruby, self-updates bard-new, and enables linger + the timer" do
+        script = cli.send(:reaper_install_script)
+        expect(script).to include("ExecStartPre=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap --create && gem install bard-new'")
+        expect(script).to include("ExecStart=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap && bard reap'")
+        expect(script).to include("loginctl enable-linger")
+        expect(script).to include("systemctl --user enable --now bard-reap.timer")
+      end
     end
   end
 

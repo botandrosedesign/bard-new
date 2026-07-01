@@ -14,6 +14,8 @@ class Bard::CLI
       raise Thor::Error.new("`bard reap` refuses to run outside a staging environment (RAILS_ENV=staging). Pass --force to override.")
     end
 
+    ensure_reaper_timer unless options[:"dry-run"]
+
     ttl = (options[:ttl] || DEFAULT_STAGING_TTL_DAYS).to_f
     reaped, left, unknown, issues = [], [], [], []
 
@@ -47,6 +49,45 @@ class Bard::CLI
   end
 
   no_commands do
+    # Idempotently installs the box-wide reaper timer. `bard reap` bootstraps its
+    # own schedule on first (non-dry) run, so no separate provisioning step is
+    # needed on the shared staging box.
+    def ensure_reaper_timer
+      system(reaper_install_script)
+    end
+
+    # Pinned to ruby-3.3.4@bard-reap: the staging box's default gemset is ruby
+    # 3.1.3, but bard requires >= 3.3, so the timer can't run reap from the default.
+    def reaper_install_script
+      <<~'SH'
+        mkdir -p ~/.config/systemd/user
+        cat > ~/.config/systemd/user/bard-reap.service <<'UNIT'
+        [Unit]
+        Description=Reap idle ephemeral bard staging sites
+
+        [Service]
+        Type=oneshot
+        ExecStartPre=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap --create && gem install bard-new'
+        ExecStart=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap && bard reap'
+        UNIT
+        cat > ~/.config/systemd/user/bard-reap.timer <<'UNIT'
+        [Unit]
+        Description=Daily reap of idle ephemeral bard staging sites
+
+        [Timer]
+        OnCalendar=daily
+        Persistent=true
+
+        [Install]
+        WantedBy=timers.target
+        UNIT
+        sudo loginctl enable-linger "$USER"
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+        systemctl --user daemon-reload
+        systemctl --user enable --now bard-reap.timer
+      SH
+    end
+
     def reap_candidates
       Dir.children(Dir.home)
         .reject { |e| e.start_with?(".") }
