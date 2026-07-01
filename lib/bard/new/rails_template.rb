@@ -3,6 +3,7 @@ rails_version = Gem.loaded_specs["railties"].version
 
 file ".ruby-version", ruby_version
 file ".ruby-gemset", project_name
+
 file ".gitignore", <<~GITIGNORE
   # See https://help.github.com/articles/ignoring-files for more about ignoring files.
   #

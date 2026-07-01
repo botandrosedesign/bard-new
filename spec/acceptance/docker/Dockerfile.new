@@ -2,20 +2,58 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install system dependencies (+ Passenger APT prerequisites)
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     openssh-server \
     nginx \
     git \
     sudo \
     curl \
+    ca-certificates \
     build-essential \
     libsqlite3-dev \
     libsodium-dev \
     gawk \
     tzdata \
+    dirmngr \
+    gnupg \
+    apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
+
+# Phusion Passenger nginx module (Ubuntu 24.04 "noble", OSS via APT)
+RUN curl -fsSL https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key-2025.txt \
+      | gpg --dearmor > /etc/apt/trusted.gpg.d/phusion.gpg && \
+    echo "deb https://oss-binaries.phusionpassenger.com/apt/passenger noble main" \
+      > /etc/apt/sources.list.d/passenger.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends libnginx-mod-http-passenger && \
+    rm -rf /var/lib/apt/lists/*
+
+# Ensure the dynamic module is enabled (nginx.conf includes modules-enabled/*.conf)
+RUN test -e /etc/nginx/modules-enabled/50-mod-http-passenger.conf || \
+    ln -s /usr/share/nginx/modules-available/mod-http-passenger.load \
+          /etc/nginx/modules-enabled/50-mod-http-passenger.conf
+
+# Shared snippet included by `bard setup`'s dev server block (mirrors staging's:
+# passenger_ruby is set globally, not per-vhost — see the conf.d override below).
+RUN mkdir -p /etc/nginx/snippets && printf '%s\n' \
+      'passenger_enabled on;' \
+      'passenger_app_env development;' \
+      'passenger_user deploy;' \
+      'passenger_group deploy;' \
+      'passenger_friendly_error_pages on;' \
+      > /etc/nginx/snippets/common.conf
+
+# Passenger's global ruby: rvm-auto-ruby reads each app's .ruby-version/.ruby-gemset
+# at boot and runs it in that gemset (the rvm-workstation equivalent of staging's
+# global passenger_free_ruby), so apps need no per-project Passenger config.
+RUN sed -i 's|^passenger_ruby .*|passenger_ruby /home/deploy/.rvm/bin/rvm-auto-ruby;|' /etc/nginx/conf.d/mod-http-passenger.conf && \
+    grep -q "passenger_ruby /home/deploy/.rvm/bin/rvm-auto-ruby;" /etc/nginx/conf.d/mod-http-passenger.conf
+
+# SysV shim so `bard setup`'s `sudo service nginx restart` works without systemd
+COPY spec/acceptance/docker/nginx-init.sh /etc/init.d/nginx
+RUN chmod +x /etc/init.d/nginx
 
 # Remove default nginx site
 RUN rm -f /etc/nginx/sites-enabled/default
@@ -24,6 +62,10 @@ RUN rm -f /etc/nginx/sites-enabled/default
 RUN useradd -m -s /bin/bash deploy && \
     echo 'deploy:password' | chpasswd && \
     echo 'deploy ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# HOME_MODE 0750 on 24.04 blocks the www-data worker from traversing /home/deploy
+# to serve <app>/public assets (→ 403). Open the traversal bit (mirrors provision User step).
+RUN chmod 755 /home/deploy
 
 # Setup SSH
 RUN mkdir -p /var/run/sshd && \
@@ -39,16 +81,17 @@ RUN chown -R deploy:deploy /home/deploy/.ssh && \
 RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 
-# Install RVM and Ruby as deploy user
+# Install RVM and Ruby as deploy user (base wrapper needed for passenger_ruby)
 USER deploy
 RUN curl -sSL https://rvm.io/mpapis.asc | gpg --import - && \
     curl -sSL https://rvm.io/pkuczynski.asc | gpg --import - && \
     curl -sSL https://get.rvm.io | bash -s stable
 
-RUN bash -lc "rvm install ruby-4.0.2 && rvm use ruby-4.0.2 --default"
+RUN bash -lc "rvm install ruby-4.0.2 && rvm use ruby-4.0.2 --default && test -x /home/deploy/.rvm/wrappers/ruby-4.0.2/ruby"
 
-# Install bard and bard-new gems from source
-RUN bash -lc "git clone --depth 1 --branch v2.0 https://github.com/botandrose/bard.git /home/deploy/bard-src && cd /home/deploy/bard-src && gem build bard.gemspec && gem install bard-*.gem"
+# Install bard-new from the working tree; bard installs as its dependency from
+# rubygems (latest) — the same version generated projects resolve (bard-rails wants
+# bard > 1) — so a plain `bard deploy` inside a project never hits a version mismatch.
 COPY --chown=deploy:deploy . /home/deploy/bard-new-src/
 RUN bash -lc "cd /home/deploy/bard-new-src && gem build bard-new.gemspec && gem install bard-new-*.gem"
 
@@ -59,7 +102,7 @@ RUN git config --global user.email "test@example.com" && \
 
 USER root
 
-# Start both sshd and nginx
+# Start both nginx and sshd
 COPY spec/acceptance/docker/entrypoint-new.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -123,14 +123,72 @@ module NewServerWorld
     @new_container = nil
     @new_ssh_port = nil
   end
+
+  def ensure_e2e_opted_in
+    skip_this_scenario unless ENV["BARD_E2E"] == "1"
+    unless File.exist?(e2e_ssh_key_path)
+      raise PrerequisiteError, "BARD_E2E=1 but no SSH key found at #{e2e_ssh_key_path} (set BARD_E2E_SSH_KEY to override)"
+    end
+  end
+
+  def e2e_ssh_key_path
+    File.expand_path(ENV["BARD_E2E_SSH_KEY"] || "~/.ssh/id_rsa")
+  end
+
+  def unique_project_name
+    "barde2e#{Time.now.to_i}#{rand(100)}"
+  end
+
+  def inject_e2e_credentials
+    cid = @new_container.id
+    unless system("podman", "cp", e2e_ssh_key_path, "#{cid}:/tmp/id_rsa")
+      raise PrerequisiteError, "failed to copy e2e ssh key into container"
+    end
+    stdout, status = run_new_ssh([
+      "sudo mv /tmp/id_rsa ~/.ssh/id_rsa",
+      "sudo chown deploy:deploy ~/.ssh/id_rsa",
+      "chmod 600 ~/.ssh/id_rsa",
+      %(printf "Host *\\n  StrictHostKeyChecking accept-new\\n" > ~/.ssh/config),
+      "chmod 600 ~/.ssh/config",
+    ].join(" && "))
+    raise PrerequisiteError, "failed to install e2e ssh key:\n#{stdout}" unless status.success?
+  end
+
+  # Safety net: the scenario destroys the project explicitly (setting @destroyed);
+  # this only fires if the scenario failed before reaching that step.
+  def destroy_e2e_project
+    return if @destroyed
+    return unless @project_name && @new_container && @new_ssh_port
+    stdout, status = run_new_ssh("cd /tmp/bardwork/current && bard destroy #{@project_name} --yes 2>&1")
+    unless status.success?
+      warn "\n!!! bard destroy did not complete cleanly for #{@project_name} — a GitHub repo or staging site may have leaked:\n#{stdout}\n"
+    end
+  end
+
+  def staging_ssh(command)
+    Open3.capture2e(
+      "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+      "-o", "ConnectTimeout=8", "-p", "22022", "-i", e2e_ssh_key_path,
+      "www@staging.botandrose.com", command
+    )
+  end
+
+  def github_repo_status(name)
+    token = `GIT_SSH_COMMAND="ssh -o BatchMode=yes" git ls-remote -t git@github.com:botandrosedesign/secrets 2>/dev/null`[/github-apikey\|(\S+)/, 1]
+    `curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer #{token}" https://api.github.com/repos/botandrosedesign/#{name}`.strip
+  end
 end
 
 World(NewServerWorld)
 
 Before("@new") do
+  ensure_e2e_opted_in
+  @project_name = unique_project_name
   start_new_server
+  inject_e2e_credentials
 end
 
 After("@new") do
+  destroy_e2e_project
   stop_new_server
 end

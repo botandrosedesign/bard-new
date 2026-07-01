@@ -7,42 +7,74 @@ Given /^a bard new server is running$/ do
   raise "New server failed to start" unless @new_container && @new_ssh_port
 end
 
-When /^I run bard new "([^"]+)"$/ do |project_name|
-  run_bard_remote("new #{project_name} --skip-github --skip-stage")
-  unless @status.success?
-    raise "bard new failed with status: #{@status}\nOutput: #{@stdout}"
-  end
+When /^I run bard new for real$/ do
+  run_bard_remote("new #{@project_name}")
+  raise "bard new failed with status: #{@status}\nOutput: #{@stdout}" unless @status.success?
 end
 
-Then /^the project "([^"]+)" should run successfully$/ do |project_name|
-  stdout, status = run_new_ssh("cd /tmp/bardwork/#{project_name} && bin/rails runner 'puts :bard_test_ok'")
-  expect(status).to be_success, "rails runner failed:\n#{stdout}"
-  expect(stdout).to include("bard_test_ok")
-end
-
-Then /^the project "([^"]+)" isolates parallel test databases$/ do |project_name|
-  stdout, status = run_new_ssh("cat /tmp/bardwork/#{project_name}/config/database.yml")
+Then /^the project isolates parallel test databases$/ do
+  stdout, status = run_new_ssh("cat /tmp/bardwork/#{@project_name}/config/database.yml")
   expect(status).to be_success, "could not read database.yml:\n#{stdout}"
   expect(stdout).to include("TEST_ENV_NUMBER")
 end
 
-Then /^the project "([^"]+)" passes its CI suite$/ do |project_name|
-  stdout, status = run_new_ssh("cd /tmp/bardwork/#{project_name} && CI=1 bundle exec rake")
-  expect(status).to be_success, "CI suite failed for #{project_name}:\n#{stdout}"
+Then /^the project is served by Passenger at its dev url$/ do
+  body = nil
+  10.times do
+    body, status = run_new_ssh("curl -sf -H 'Host: #{@project_name}.localhost' http://localhost/")
+    break if status.success? && body.include?(@project_name)
+    sleep 3
+  end
+  expect(body).to include(@project_name), "dev site (Passenger) did not serve the app:\n#{body}"
 end
 
-Then /^the project "([^"]+)" should respond to http:\/\/(.+)$/ do |project_name, hostname|
-  Open3.capture2e(
-    "timeout", "3",
-    "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-    "-p", @new_ssh_port.to_s, "-i", new_ssh_key_path,
-    "deploy@localhost",
-    "bash -lc 'cd /tmp/bardwork/#{project_name} && setsid -f bundle exec puma -p 3000 </dev/null >/tmp/puma.log 2>&1'"
-  )
-  sleep 5
-  stdout, status = run_new_ssh("curl -sf -H 'Host: #{hostname}' http://localhost/")
-  expect(status).to be_success, "HTTP request to #{hostname} failed:\n#{stdout}"
-  expect(stdout).to include(project_name)
+Then /^the project's CI suite passed on GitHub Actions$/ do
+  # bard new only succeeds if `bard deploy` gated on a green CI run, but assert it
+  # explicitly against the GitHub Actions API. (bard's run! swallows the CI output
+  # on success, so we can't scrape it from @stdout.)
+  out = nil
+  3.times do
+    out, st = run_new_ssh("cd /tmp/bardwork/#{@project_name} && bard ci --status")
+    break if st.success? && out =~ /succeeded/i
+    sleep 3
+  end
+  expect(out).to match(/succeeded/i), "bard ci --status did not report success:\n#{out}"
+end
+
+Then /^the project responds on staging$/ do
+  body = nil
+  10.times do
+    body, status = run_new_ssh("curl -sf https://#{@project_name}.botandrose.com/")
+    break if status.success? && body.include?(@project_name)
+    sleep 3
+  end
+  expect(body).to include(@project_name), "staging site did not serve the app:\n#{body}"
+end
+
+Then /^the project has its own rvm gemset$/ do
+  stdout, _ = run_new_ssh("rvm gemset list")
+  expect(stdout).to include(@project_name), "expected an rvm gemset named #{@project_name}:\n#{stdout}"
+end
+
+# bard destroy steps
+When /^I destroy the project$/ do
+  stdout, status = run_new_ssh("cd /tmp/bardwork/current && bard destroy #{@project_name} --yes")
+  raise "bard destroy failed:\n#{stdout}" unless status.success?
+  @destroyed = true
+end
+
+Then /^the local rvm gemset is removed$/ do
+  stdout, _ = run_new_ssh("rvm gemset list")
+  expect(stdout).not_to include(@project_name), "rvm gemset #{@project_name} still present:\n#{stdout}"
+end
+
+Then /^the staging deploy is removed$/ do
+  stdout, _ = staging_ssh("ls -d ~/#{@project_name} 2>&1")
+  expect(stdout).to match(/No such file|cannot access/), "staging app dir still present:\n#{stdout}"
+end
+
+Then /^the GitHub repo no longer exists$/ do
+  expect(github_repo_status(@project_name)).to eq("404"), "GitHub repo botandrosedesign/#{@project_name} still exists"
 end
 
 # bard provision steps
