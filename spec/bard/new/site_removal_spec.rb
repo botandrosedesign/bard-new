@@ -55,7 +55,7 @@ describe Bard::SiteRemoval do
 
     expect(calls).to eq([
       Bard::ProcessManager::SystemdUser.new("/home/www/acme").teardown_command,
-      "cd /home/www/acme && bin/rake db:drop >/dev/null 2>&1",
+      "bash -lc #{Shellwords.escape("cd /home/www/acme && bin/rake db:drop")} >/dev/null 2>&1",
       "sudo rm -f /etc/nginx/sites-available/acme /etc/nginx/sites-enabled/acme",
       "sudo service nginx reload || true",
     ])

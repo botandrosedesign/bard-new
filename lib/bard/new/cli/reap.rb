@@ -44,7 +44,6 @@ class Bard::CLI
     end
 
     reap_print_report(reaped, left, unknown, issues)
-    exit 1 if issues.any?
   end
 
   no_commands do

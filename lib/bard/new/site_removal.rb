@@ -73,9 +73,10 @@ module Bard
 
     # Best-effort: the crown jewel (master key) is removed regardless below, but
     # for non-sqlite adapters the data lives outside the directory and must be
-    # dropped explicitly. Uses the ambient RAILS_ENV to target the right database.
+    # dropped explicitly. Runs in a login shell so rvm activates the app's own
+    # gemset/ruby on cd; uses the ambient RAILS_ENV to target the right database.
     def drop_database
-      sh "cd #{Shellwords.escape(dir)} && bin/rake db:drop >/dev/null 2>&1"
+      sh "bash -lc #{Shellwords.escape("cd #{dir} && bin/rake db:drop")} >/dev/null 2>&1"
     end
 
     def remove_nginx_site

@@ -70,7 +70,7 @@ describe "bard reap (integration)", :slow do
     expect(out).to match(/Left \(1\).*\bfresh\b/m)
     expect(out).to match(/Unknown \(1\).*\bperm\b/m)
     expect(out).to match(/Issues \(1\).*\bbroken\b/m)
-    expect(status.exitstatus).to eq(1) # issues present => non-zero
+    expect(status.exitstatus).to eq(0) # issues are flagged but not fatal
   end
 
   it "refuses to run outside a staging environment" do

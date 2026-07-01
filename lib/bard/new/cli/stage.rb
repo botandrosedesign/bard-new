@@ -25,6 +25,8 @@ class Bard::CLI
       puts "#{project_name} staging self-destructs after #{DEFAULT_STAGING_TTL_DAYS} days idle unless re-staged."
     end
 
+    # Pinned to ruby-3.3.4@bard-reap: the staging box's default gemset is ruby
+    # 3.1.3, but bard requires >= 3.3, so the timer can't run reap from the default.
     def reaper_install_script
       <<~'SH'
         mkdir -p ~/.config/systemd/user
@@ -34,8 +36,8 @@ class Bard::CLI
 
         [Service]
         Type=oneshot
-        ExecStartPre=/bin/bash -lc 'gem install bard-new || true'
-        ExecStart=/bin/bash -lc 'bard reap'
+        ExecStartPre=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap --create && gem install bard-new'
+        ExecStart=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap && bard reap'
         UNIT
         cat > ~/.config/systemd/user/bard-reap.timer <<'UNIT'
         [Unit]

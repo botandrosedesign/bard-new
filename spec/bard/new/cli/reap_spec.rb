@@ -78,15 +78,14 @@ describe "bard reap" do
       end
     end
 
-    it "reaps ripe ephemeral sites, keeps fresh ones, and flags issues" do
+    it "reaps ripe ephemeral sites, keeps fresh ones, and flags issues without failing" do
       removal = instance_double(Bard::SiteRemoval, call: nil)
       expect(Bard::SiteRemoval).to receive(:new).with(File.join(Dir.home, "ripe")).and_return(removal)
       expect(Bard::SiteRemoval).not_to receive(:new).with(File.join(Dir.home, "fresh"))
-      allow(cli).to receive(:exit)
+      expect(cli).to receive(:puts).with(a_string_matching(/Issues \(1\)/))
+      expect(cli).not_to receive(:exit)
 
       cli.reap
-
-      expect(cli).to have_received(:exit).with(1) # broken -> issues -> nonzero
     end
 
     it "does not reap anything on a dry run" do
