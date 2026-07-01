@@ -154,7 +154,7 @@ module ProvisionServerWorld
     run_provision_ssh_as("www", <<~SH)
       cat > ~/testproject/Gemfile << 'GEMFILE'
 source "https://rubygems.org"
-gem "bard", github: "botandrose/bard", branch: "v2.0"
+gem "bard"
 gem "foreman-export-systemd_user"
 GEMFILE
     SH
