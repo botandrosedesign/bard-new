@@ -34,6 +34,7 @@ class Bard::CLI
 
         [Service]
         Type=oneshot
+        ExecStartPre=/bin/bash -lc 'gem install bard-new || true'
         ExecStart=/bin/bash -lc 'bard reap'
         UNIT
         cat > ~/.config/systemd/user/bard-reap.timer <<'UNIT'

@@ -30,6 +30,11 @@ describe "bard-new after_stage hook" do
       expect(script).to include("ExecStart=/bin/bash -lc 'bard reap'")
       expect(script).to include("systemctl --user enable --now bard-reap.timer")
     end
+
+    it "self-updates bard-new before each reap" do
+      script = cli.send(:reaper_install_script)
+      expect(script).to include("ExecStartPre=/bin/bash -lc 'gem install bard-new || true'")
+    end
   end
 
   describe "#after_stage" do
