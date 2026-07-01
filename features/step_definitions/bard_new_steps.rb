@@ -20,6 +20,17 @@ Then /^the project "([^"]+)" should run successfully$/ do |project_name|
   expect(stdout).to include("bard_test_ok")
 end
 
+Then /^the project "([^"]+)" isolates parallel test databases$/ do |project_name|
+  stdout, status = run_new_ssh("cat /tmp/bardwork/#{project_name}/config/database.yml")
+  expect(status).to be_success, "could not read database.yml:\n#{stdout}"
+  expect(stdout).to include("TEST_ENV_NUMBER")
+end
+
+Then /^the project "([^"]+)" passes its CI suite$/ do |project_name|
+  stdout, status = run_new_ssh("cd /tmp/bardwork/#{project_name} && CI=1 bundle exec rake")
+  expect(status).to be_success, "CI suite failed for #{project_name}:\n#{stdout}"
+end
+
 Then /^the project "([^"]+)" should respond to http:\/\/(.+)$/ do |project_name, hostname|
   Open3.capture2e(
     "timeout", "3",

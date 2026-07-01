@@ -10,3 +10,5 @@ Feature: bard new
     Then the output should contain "Project testproject created!"
     And the project "testproject" should run successfully
     And the project "testproject" should respond to http://testproject.localhost
+    And the project "testproject" isolates parallel test databases
+    And the project "testproject" passes its CI suite
