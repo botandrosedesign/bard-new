@@ -2,14 +2,14 @@ PATH
   remote: .
   specs:
     bard-new (0.1.2)
-      bard
+      bard (>= 2.1.0)
 
 GEM
   remote: http://rubygems.org/
   specs:
     addressable (2.8.9)
       public_suffix (>= 2.0.2, < 8.0)
-    bard (2.0.2)
+    bard (2.1.0)
       base64
       rbnacl
       rvm

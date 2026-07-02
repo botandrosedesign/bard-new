@@ -1,5 +1,6 @@
 require "bard/config"
 require "bard/plugins/github"
+require "bard/new/site_removal"
 
 class Bard::CLI
   desc "destroy <project-name>", "tears down everything `bard new` created: remote deploy, GitHub repo, and local project"
@@ -50,35 +51,12 @@ class Bard::CLI
     end
 
     def destroy_teardown(target, project_dir)
-      name = @destroy_project_name
       print "#{target.key.to_s.capitalize}:"
-      print " stopping services,"
-      target.run! destroy_stop_services_script(name), home: true, quiet: true
-      print " removing nginx site,"
-      target.run! destroy_remove_nginx_script(name), home: true, quiet: true
-      print " removing rvm gemset,"
-      target.run! destroy_remove_gemset_script(name), home: true, quiet: true
-      print " removing project directory,"
-      target.run! "rm -rf #{project_dir}", home: true, quiet: true
+      Bard::SiteRemoval.new(project_dir).steps.each do |label, script|
+        print " #{label},"
+        target.run! script, home: true, quiet: true
+      end
       puts " ✓"
-    end
-
-    def destroy_stop_services_script(name)
-      [
-        "systemctl --user stop #{name}.target 2>/dev/null || true",
-        "systemctl --user disable #{name}.target 2>/dev/null || true",
-        "rm -f ~/.config/systemd/user/#{name}*.service ~/.config/systemd/user/#{name}.target",
-        "rm -rf ~/.config/systemd/user/#{name}.target.wants",
-        "systemctl --user daemon-reload 2>/dev/null || true",
-      ].join("; ")
-    end
-
-    def destroy_remove_nginx_script(name)
-      "sudo rm -f /etc/nginx/sites-available/#{name} /etc/nginx/sites-enabled/#{name}; sudo service nginx reload || true"
-    end
-
-    def destroy_remove_gemset_script(name)
-      "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete #{new_ruby_version}@#{name} || true'"
     end
   end
 end

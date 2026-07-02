@@ -1,95 +1,58 @@
-require "fileutils"
 require "shellwords"
 
 module Bard
-  # Knows how to tear down an app's process-supervision units, whatever
-  # supervisor the project uses. Passenger-served staging sites have none, so
-  # every backend is a safe no-op there.
-  class ProcessManager
-    def self.for(dir)
-      if File.exist?(File.join(dir, "procsd.yml"))
-        Procsd.new(dir)
-      else
-        SystemdUser.new(dir)
-      end
-    end
-
-    attr_reader :dir, :name
-
-    def initialize(dir)
-      @dir = dir
-      @name = File.basename(File.expand_path(dir))
-    end
-
-    def teardown_command
-      raise NotImplementedError
-    end
-
-    class SystemdUser < ProcessManager
-      def teardown_command
-        [
-          "systemctl --user stop #{name}.target 2>/dev/null || true",
-          "systemctl --user disable #{name}.target 2>/dev/null || true",
-          "rm -f ~/.config/systemd/user/#{name}*.service ~/.config/systemd/user/#{name}.target",
-          "rm -rf ~/.config/systemd/user/#{name}.target.wants",
-          "systemctl --user daemon-reload 2>/dev/null || true",
-        ].join("; ")
-      end
-    end
-
-    class Procsd < ProcessManager
-      def teardown_command
-        "cd #{Shellwords.escape(dir)} && procsd destroy 2>/dev/null || true"
-      end
-    end
-  end
-
-  # Removes a single deployed site living at `dir` on the local machine: stops
-  # its processes, drops its database, removes its nginx site, and deletes the
-  # directory. Shared by `bard remove`, `bard reap`, and (over SSH) `bard destroy`.
+  # Tears down a single deployed site rooted at `dir`: stops its services, drops
+  # its database, removes its nginx site and rvm gemset, and deletes the directory.
+  # Shared by `bard destroy` (which runs the steps over a target, remote or local)
+  # and `bard reap` / `bard remove` (which run them locally). Exposed as ordered
+  # [label, shell-command] steps so each caller executes them in its own context.
   class SiteRemoval
-    Result = Struct.new(:name, :db_dropped, keyword_init: true)
-
-    attr_reader :dir, :name
-
     def initialize(dir = Dir.pwd)
-      @dir = File.expand_path(dir)
+      @dir = dir.to_s
       @name = File.basename(@dir)
     end
 
+    def steps
+      [
+        ["stopping services",          stop_services_script],
+        ["dropping database",          drop_database_script],
+        ["removing nginx site",        remove_nginx_script],
+        ["removing rvm gemset",        remove_gemset_script],
+        ["removing project directory", "rm -rf #{@dir}"],
+      ]
+    end
+
+    # Run the teardown locally and quietly (used by `bard reap` and `bard remove`).
     def call
-      stop_processes
-      db_dropped = drop_database
-      remove_nginx_site
-      remove_directory
-      Result.new(name: name, db_dropped: db_dropped)
+      steps.each { |_, script| system("( #{script} ) >/dev/null 2>&1") }
     end
 
     private
 
-    def stop_processes
-      sh ProcessManager.for(dir).teardown_command
+    def stop_services_script
+      [
+        "systemctl --user stop #{@name}.target 2>/dev/null || true",
+        "systemctl --user disable #{@name}.target 2>/dev/null || true",
+        "rm -f ~/.config/systemd/user/#{@name}*.service ~/.config/systemd/user/#{@name}.target",
+        "rm -rf ~/.config/systemd/user/#{@name}.target.wants",
+        "systemctl --user daemon-reload 2>/dev/null || true",
+      ].join("; ")
     end
 
-    # Best-effort: the crown jewel (master key) is removed regardless below, but
-    # for non-sqlite adapters the data lives outside the directory and must be
-    # dropped explicitly. Runs in a login shell so rvm activates the app's own
-    # gemset/ruby on cd; uses the ambient RAILS_ENV to target the right database.
-    def drop_database
-      sh "bash -lc #{Shellwords.escape("cd #{dir} && bin/rake db:drop")} >/dev/null 2>&1"
+    # Login shell + cd so rvm activates the app's own gemset/ruby before rake runs;
+    # ambient RAILS_ENV picks the right database. Best-effort (no-op for sqlite).
+    def drop_database_script
+      "bash -lc #{Shellwords.escape("cd #{@dir} && bin/rake db:drop")} >/dev/null 2>&1 || true"
     end
 
-    def remove_nginx_site
-      sh "sudo rm -f /etc/nginx/sites-available/#{name} /etc/nginx/sites-enabled/#{name}"
-      sh "sudo service nginx reload || true"
+    def remove_nginx_script
+      "sudo rm -f /etc/nginx/sites-available/#{@name} /etc/nginx/sites-enabled/#{@name}; sudo service nginx reload || true"
     end
 
-    def remove_directory
-      FileUtils.rm_rf(dir)
-    end
-
-    def sh(command)
-      system(command)
+    # Reads the checkout's own ruby so it removes the right gemset regardless of
+    # which ruby the site was built with (staging sites vary).
+    def remove_gemset_script
+      "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete \"$(cat #{@dir}/.ruby-version 2>/dev/null)@#{@name}\" || true'"
     end
   end
 end

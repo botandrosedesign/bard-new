@@ -1,70 +1,67 @@
 require "spec_helper"
-
-describe Bard::ProcessManager do
-  describe ".for" do
-    it "selects the procsd backend when procsd.yml is present" do
-      allow(File).to receive(:exist?).with("/app/procsd.yml").and_return(true)
-      expect(described_class.for("/app")).to be_a(Bard::ProcessManager::Procsd)
-    end
-
-    it "defaults to the systemd-user backend" do
-      allow(File).to receive(:exist?).with("/app/procsd.yml").and_return(false)
-      expect(described_class.for("/app")).to be_a(Bard::ProcessManager::SystemdUser)
-    end
-  end
-
-  describe Bard::ProcessManager::SystemdUser do
-    it "stops, disables, and removes the app's units" do
-      cmd = described_class.new("/home/www/acme").teardown_command
-      expect(cmd).to eq(
-        "systemctl --user stop acme.target 2>/dev/null || true; " \
-        "systemctl --user disable acme.target 2>/dev/null || true; " \
-        "rm -f ~/.config/systemd/user/acme*.service ~/.config/systemd/user/acme.target; " \
-        "rm -rf ~/.config/systemd/user/acme.target.wants; " \
-        "systemctl --user daemon-reload 2>/dev/null || true"
-      )
-    end
-  end
-
-  describe Bard::ProcessManager::Procsd do
-    it "runs procsd destroy in the app directory" do
-      expect(described_class.new("/home/www/acme").teardown_command)
-        .to eq("cd /home/www/acme && procsd destroy 2>/dev/null || true")
-    end
-  end
-end
+require "shellwords"
 
 describe Bard::SiteRemoval do
   subject(:removal) { described_class.new("/home/www/acme") }
 
-  before do
-    allow(File).to receive(:exist?).and_call_original
-    allow(File).to receive(:exist?).with("/home/www/acme/procsd.yml").and_return(false)
-    allow(FileUtils).to receive(:rm_rf)
+  def script_for(label)
+    removal.steps.find { |l, _| l == label }.last
   end
 
   it "derives the site name from the directory" do
-    expect(removal.name).to eq("acme")
+    expect(removal.send(:instance_variable_get, :@name)).to eq("acme")
   end
 
-  it "stops processes, drops the db, removes nginx, then deletes the directory in order" do
-    calls = []
-    allow(removal).to receive(:sh) { |c| calls << c; true }
-
-    removal.call
-
-    expect(calls).to eq([
-      Bard::ProcessManager::SystemdUser.new("/home/www/acme").teardown_command,
-      "bash -lc #{Shellwords.escape("cd /home/www/acme && bin/rake db:drop")} >/dev/null 2>&1",
-      "sudo rm -f /etc/nginx/sites-available/acme /etc/nginx/sites-enabled/acme",
-      "sudo service nginx reload || true",
+  it "tears down in order: stop, db:drop, nginx, gemset, rm" do
+    expect(removal.steps.map(&:first)).to eq([
+      "stopping services",
+      "dropping database",
+      "removing nginx site",
+      "removing rvm gemset",
+      "removing project directory",
     ])
-    expect(FileUtils).to have_received(:rm_rf).with("/home/www/acme")
   end
 
-  it "reports whether the database was dropped" do
-    allow(removal).to receive(:sh).and_return(true, false, true, true)
-    expect(removal.call.db_dropped).to eq(false)
+  it "stops the systemd units" do
+    expect(script_for("stopping services")).to eq(
+      "systemctl --user stop acme.target 2>/dev/null || true; " \
+      "systemctl --user disable acme.target 2>/dev/null || true; " \
+      "rm -f ~/.config/systemd/user/acme*.service ~/.config/systemd/user/acme.target; " \
+      "rm -rf ~/.config/systemd/user/acme.target.wants; " \
+      "systemctl --user daemon-reload 2>/dev/null || true"
+    )
+  end
+
+  it "drops the database in a login shell so rvm activates the app's gemset" do
+    expect(script_for("dropping database")).to eq(
+      "bash -lc #{Shellwords.escape("cd /home/www/acme && bin/rake db:drop")} >/dev/null 2>&1 || true"
+    )
+  end
+
+  it "removes the nginx site" do
+    expect(script_for("removing nginx site")).to eq(
+      "sudo rm -f /etc/nginx/sites-available/acme /etc/nginx/sites-enabled/acme; sudo service nginx reload || true"
+    )
+  end
+
+  it "removes the gemset named after the checkout's own ruby" do
+    expect(script_for("removing rvm gemset")).to eq(
+      "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete \"$(cat /home/www/acme/.ruby-version 2>/dev/null)@acme\" || true'"
+    )
+  end
+
+  it "deletes the directory last" do
+    expect(script_for("removing project directory")).to eq("rm -rf /home/www/acme")
+  end
+
+  describe "#call" do
+    it "runs every step locally and quietly" do
+      ran = []
+      allow(removal).to receive(:system) { |c| ran << c; true }
+      removal.call
+      expect(ran.size).to eq(5)
+      expect(ran).to all(match(/>\/dev\/null 2>&1\z/))
+    end
   end
 end
 

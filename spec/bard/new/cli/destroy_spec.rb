@@ -82,15 +82,18 @@ describe "bard destroy" do
         allow(target).to receive(:key).and_return(:production)
       end
 
-      it "stops services, removes the nginx site, the gemset, and the app" do
+      it "stops services, drops the db, removes the nginx site and gemset, and the app" do
         expect(target).to receive(:run!).with(
           "systemctl --user stop testproject.target 2>/dev/null || true; systemctl --user disable testproject.target 2>/dev/null || true; rm -f ~/.config/systemd/user/testproject*.service ~/.config/systemd/user/testproject.target; rm -rf ~/.config/systemd/user/testproject.target.wants; systemctl --user daemon-reload 2>/dev/null || true",
+          home: true, quiet: true)
+        expect(target).to receive(:run!).with(
+          "bash -lc #{Shellwords.escape("cd ~/testproject && bin/rake db:drop")} >/dev/null 2>&1 || true",
           home: true, quiet: true)
         expect(target).to receive(:run!).with(
           "sudo rm -f /etc/nginx/sites-available/testproject /etc/nginx/sites-enabled/testproject; sudo service nginx reload || true",
           home: true, quiet: true)
         expect(target).to receive(:run!).with(
-          "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete ruby-4.0.2@testproject || true'",
+          "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete \"$(cat ~/testproject/.ruby-version 2>/dev/null)@testproject\" || true'",
           home: true, quiet: true)
         expect(target).to receive(:run!).with("rm -rf ~/testproject", home: true, quiet: true)
 
@@ -144,15 +147,18 @@ describe "bard destroy" do
       allow(dconfig).to receive(:[]).with(:local).and_return(local_target)
     end
 
-    it "stops services, removes the nginx site, gemset, and project directory locally" do
+    it "stops services, drops the db, removes the nginx site and gemset, and the project directory locally" do
       expect(local_target).to receive(:run!).with(
         "systemctl --user stop testproject.target 2>/dev/null || true; systemctl --user disable testproject.target 2>/dev/null || true; rm -f ~/.config/systemd/user/testproject*.service ~/.config/systemd/user/testproject.target; rm -rf ~/.config/systemd/user/testproject.target.wants; systemctl --user daemon-reload 2>/dev/null || true",
+        home: true, quiet: true)
+      expect(local_target).to receive(:run!).with(
+        "bash -lc #{Shellwords.escape("cd ../testproject && bin/rake db:drop")} >/dev/null 2>&1 || true",
         home: true, quiet: true)
       expect(local_target).to receive(:run!).with(
         "sudo rm -f /etc/nginx/sites-available/testproject /etc/nginx/sites-enabled/testproject; sudo service nginx reload || true",
         home: true, quiet: true)
       expect(local_target).to receive(:run!).with(
-        "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete ruby-4.0.2@testproject || true'",
+        "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete \"$(cat ../testproject/.ruby-version 2>/dev/null)@testproject\" || true'",
         home: true, quiet: true)
       expect(local_target).to receive(:run!).with("rm -rf ../testproject", home: true, quiet: true)
 
