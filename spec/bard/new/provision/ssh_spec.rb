@@ -52,7 +52,9 @@ describe Bard::Provision::SSH do
 
         expect(ssh_provisioner).to receive(:add_ssh_known_host!).with(provision_ssh_uri).twice
         expect(provision_server).to receive(:run!).with(
-          'echo "Port 2222" | sudo tee /etc/ssh/sshd_config.d/port_2222.conf && sudo service ssh restart',
+          a_string_matching(/echo "Port 2222" \| sudo tee \/etc\/ssh\/sshd_config\.d\/port_2222\.conf/)
+            .and(a_string_matching(/systemctl disable --now ssh\.socket/))
+            .and(a_string_matching(/systemctl restart ssh/)),
           home: true
         )
 
