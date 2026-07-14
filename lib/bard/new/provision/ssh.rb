@@ -19,7 +19,8 @@ class Bard::Provision::SSH < Bard::Provision
         add_ssh_known_host!(provision_server.ssh_uri)
       end
       print " Reconfiguring port to #{target_port},"
-      provision_server.run! %(echo "Port #{target_port}" | sudo tee /etc/ssh/sshd_config.d/port_#{target_port}.conf && sudo service ssh restart), home: true
+      # Ubuntu 24.04+ socket-activates sshd; disable ssh.socket so the Port directive takes effect.
+      provision_server.run! %(echo "Port #{target_port}" | sudo tee /etc/ssh/sshd_config.d/port_#{target_port}.conf && sudo systemctl disable --now ssh.socket 2>/dev/null; sudo systemctl enable --now ssh.service && sudo systemctl restart ssh), home: true
       5.times do
         sleep 1
         break if ssh_available?(provision_server.ssh_uri, port: target_port)
