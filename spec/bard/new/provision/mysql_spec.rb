@@ -20,7 +20,7 @@ describe Bard::Provision::MySQL do
       it "installs MySQL" do
         allow(mysql).to receive(:mysql_responding?).and_return(false)
 
-        expect(provision_server).to receive(:run!).with(/DEBIAN_FRONTEND=noninteractive.*apt-get install -y mysql-server/, home: true)
+        expect(provision_server).to receive(:run!).with(/DEBIAN_FRONTEND=noninteractive.*apt-get .*install -y mysql-server/, home: true)
 
         mysql.call
       end

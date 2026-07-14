@@ -24,7 +24,7 @@ describe Bard::Provision::Nginx do
         allow(nginx).to receive(:http_responding?).and_return(false)
         allow(nginx).to receive(:app_configured?).and_return(true)
 
-        expect(provision_server).to receive(:run!).with(/apt-get install -y nginx/, home: true)
+        expect(provision_server).to receive(:run!).with(/apt-get .*install -y nginx/, home: true)
 
         nginx.call
       end

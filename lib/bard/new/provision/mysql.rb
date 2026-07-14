@@ -5,7 +5,7 @@ class Bard::Provision::MySQL < Bard::Provision
     print "MySQL:"
     if !mysql_responding?
       print " Installing,"
-      provision_server.run! "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server", home: true
+      provision_server.run! "sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y mysql-server", home: true
     end
 
     print " Granting #{deploy_user} peer auth,"

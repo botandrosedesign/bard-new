@@ -10,7 +10,7 @@ class Bard::Provision::Nginx < Bard::Provision
       provision_server.run! [
         %(grep -qxF "RAILS_ENV=production" /etc/environment || echo "RAILS_ENV=production" | sudo tee -a /etc/environment),
         %(grep -qxF "EDITOR=vim" /etc/environment || echo "EDITOR=vim" | sudo tee -a /etc/environment),
-        "sudo apt-get install -y nginx",
+        "sudo apt-get -o DPkg::Lock::Timeout=600 install -y nginx",
         "sudo rm -f /etc/nginx/sites-enabled/default",
       ].join("; "), home: true
     end
