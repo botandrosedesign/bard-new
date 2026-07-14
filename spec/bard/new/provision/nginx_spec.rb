@@ -3,19 +3,19 @@ require "bard/new/provision/base"
 require "bard/new/provision/nginx"
 
 describe Bard::Provision::Nginx do
-  let(:target) { double("target", project_name: "test_app") }
+  let(:target) { double("target", project_name: "test_app", ping: ["https://test.example.com"]) }
   let(:config) { double("config", project_name: "test_app", :[] => target) }
-  let(:ssh_url) { "user@example.com" }
-  let(:provision_server) { double("provision_server") }
+  let(:ssh_url) { "www@example.com" }
+  let(:provision_server) { double("provision_server", ssh_uri: double("ssh_uri", user: "www")) }
   let(:nginx) { Bard::Provision::Nginx.new(config, ssh_url) }
 
   before do
     allow(nginx).to receive(:target).and_return(target)
     allow(nginx).to receive(:provision_server).and_return(provision_server)
-    allow(provision_server).to receive_message_chain(:ssh_uri, :host).and_return("192.168.1.100")
     allow(nginx).to receive(:print)
     allow(nginx).to receive(:puts)
-    allow(nginx).to receive(:system)
+    allow(provision_server).to receive(:run!)
+    allow(provision_server).to receive(:run!).with("pwd", capture: true).and_return("/home/www/test_app\r\n")
   end
 
   describe "#call" do
@@ -31,14 +31,42 @@ describe Bard::Provision::Nginx do
     end
 
     context "when app is not configured" do
-      it "creates nginx config" do
+      before do
         allow(nginx).to receive(:http_responding?).and_return(true)
         allow(nginx).to receive(:app_configured?).and_return(false)
+      end
 
-        expect(provision_server).to receive(:run!).with("bard setup")
+      it "writes the nginx site config itself, without bard-cli on the server" do
+        expect(provision_server).to receive(:run!).with(
+          a_string_matching(%r{sudo tee /etc/nginx/sites-available/test_app})
+            .and(a_string_matching(%r{server_name \*\.test\.example\.com _;}))
+            .and(a_string_matching(%r{root /home/www/test_app/public;}))
+            .and(a_string_matching(%r{proxy_pass http://puma;}))
+            .and(a_string_matching(%r{ln -sf /etc/nginx/sites-available/test_app /etc/nginx/sites-enabled/test_app}))
+            .and(a_string_matching(/service nginx restart/)),
+          home: true,
+        )
 
         nginx.call
       end
+
+      it "does not interpolate shell variables into the config" do
+        expect(provision_server).to receive(:run!).with(
+          a_string_matching(/<<-'EOF'/).and(a_string_matching(/try_files \$uri @app;/)),
+          home: true,
+        )
+
+        nginx.call
+      end
+    end
+
+    it "enables lingering so procsd user units survive reboot" do
+      allow(nginx).to receive(:http_responding?).and_return(true)
+      allow(nginx).to receive(:app_configured?).and_return(true)
+
+      expect(provision_server).to receive(:run!).with("sudo loginctl enable-linger www", home: true)
+
+      nginx.call
     end
 
     context "when everything is already set up" do
@@ -46,7 +74,7 @@ describe Bard::Provision::Nginx do
         allow(nginx).to receive(:http_responding?).and_return(true)
         allow(nginx).to receive(:app_configured?).and_return(true)
 
-        expect(provision_server).not_to receive(:run!)
+        expect(provision_server).not_to receive(:run!).with(a_string_matching(/apt-get|sudo tee/), anything)
 
         nginx.call
       end
