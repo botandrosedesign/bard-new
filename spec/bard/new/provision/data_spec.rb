@@ -20,29 +20,29 @@ describe Bard::Provision::Data do
   describe "#call" do
     it "dumps, transfers, and loads database data" do
       expect(target).to receive(:run!).with("bin/rake db:dump")
-      expect(target).to receive(:copy_file).with("db/data.sql.gz", to: provision_server, verbose: false)
+      expect(Bard::Copy).to receive(:file).with("db/data.sql.gz", from: target, to: provision_server, verbose: false)
       expect(provision_server).to receive(:run!).with("bin/rake db:load")
 
-      allow(target).to receive(:copy_dir)
+      allow(Bard::Copy).to receive(:dir)
 
       data_provisioner.call
     end
 
     it "synchronizes configured data directories" do
       allow(target).to receive(:run!)
-      allow(target).to receive(:copy_file)
+      allow(Bard::Copy).to receive(:file)
       allow(provision_server).to receive(:run!)
 
-      expect(target).to receive(:copy_dir).with("uploads", to: provision_server, verbose: false)
-      expect(target).to receive(:copy_dir).with("assets", to: provision_server, verbose: false)
+      expect(Bard::Copy).to receive(:dir).with("uploads", from: target, to: provision_server, verbose: false)
+      expect(Bard::Copy).to receive(:dir).with("assets", from: target, to: provision_server, verbose: false)
 
       data_provisioner.call
     end
 
     it "prints status messages" do
       allow(target).to receive(:run!)
-      allow(target).to receive(:copy_file)
-      allow(target).to receive(:copy_dir)
+      allow(Bard::Copy).to receive(:file)
+      allow(Bard::Copy).to receive(:dir)
       allow(provision_server).to receive(:run!)
 
       expect(data_provisioner).to receive(:print).with("Data:")
