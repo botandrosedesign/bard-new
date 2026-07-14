@@ -27,6 +27,9 @@ class Bard::Provision::Repo < Bard::Provision
       end
     end
 
+    # git can't track empty dirs; puma's pidfile needs tmp/pids on a fresh clone.
+    provision_server.run! "mkdir -p ~/#{project_name}/tmp/pids", home: true
+
     puts " ✓"
   end
 

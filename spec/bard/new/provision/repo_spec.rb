@@ -16,7 +16,17 @@ describe Bard::Provision::Repo do
     allow(repo_provisioner).to receive(:provision_server).and_return(provision_server)
     allow(repo_provisioner).to receive(:print)
     allow(repo_provisioner).to receive(:puts)
+    allow(provision_server).to receive(:run!).with(%r{mkdir -p ~/test_project/tmp/pids}, home: true)
     allow(Bard::Github).to receive(:new).and_return(github_api)
+  end
+
+  it "ensures tmp/pids exists so puma can write its pidfile on a fresh clone" do
+    allow(repo_provisioner).to receive(:already_cloned?).and_return(true)
+    allow(repo_provisioner).to receive(:on_latest_master?).and_return(true)
+
+    expect(provision_server).to receive(:run!).with("mkdir -p ~/test_project/tmp/pids", home: true)
+
+    repo_provisioner.call
   end
 
   describe "#call" do

@@ -16,6 +16,7 @@ describe Bard::Provision::HTTP do
     allow(http).to receive(:print)
     allow(http).to receive(:puts)
     allow(http).to receive(:system)
+    allow(http).to receive(:sleep)
   end
 
   describe "#call" do
@@ -30,10 +31,22 @@ describe Bard::Provision::HTTP do
     end
 
     context "when HTTP test fails" do
-      it "shows failure message" do
+      it "shows failure message after exhausting retries" do
         allow(http).to receive(:system).and_return(false)
 
+        expect(http).to receive(:system).exactly(described_class::RETRIES).times
         expect(http).to receive(:puts).with(" !!! not serving a rails app from 192.168.1.100")
+
+        http.call
+      end
+    end
+
+    context "when the app is still booting" do
+      it "retries until it responds" do
+        allow(http).to receive(:system).and_return(false, false, true)
+
+        expect(http).to receive(:sleep).with(2).twice
+        expect(http).to receive(:puts).with(" ✓")
 
         http.call
       end
