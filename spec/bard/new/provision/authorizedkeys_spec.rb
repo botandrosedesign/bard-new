@@ -15,8 +15,12 @@ describe Bard::Provision::AuthorizedKeys do
   end
 
   describe "#call" do
-    it "adds authorized keys to the server" do
-      expect(provision_server).to receive(:run!).at_least(:once).with(/grep -F -q/, home: true)
+    it "overwrites authorized_keys with exactly the canonical key set" do
+      expect(provision_server).to receive(:run!).with(
+        a_string_matching(/echo ".*" > ~\/.ssh\/authorized_keys/m)
+          .and(a_string_matching(/chmod 600 ~\/.ssh\/authorized_keys/)),
+        home: true,
+      )
 
       authorized_keys.call
     end
@@ -31,10 +35,12 @@ describe Bard::Provision::AuthorizedKeys do
   end
 
   describe "KEYS constant" do
-    it "should have predefined SSH keys" do
-      expect(Bard::Provision::AuthorizedKeys::KEYS).to be_a(Hash)
+    it "contains only current hardware-backed keys" do
+      expect(Bard::Provision::AuthorizedKeys::KEYS).to be_an(Array)
       expect(Bard::Provision::AuthorizedKeys::KEYS).not_to be_empty
-      expect(Bard::Provision::AuthorizedKeys::KEYS.keys.first).to match(/@/)
+      Bard::Provision::AuthorizedKeys::KEYS.each do |key|
+        expect(key).to start_with("sk-ssh-ed25519@openssh.com ")
+      end
     end
   end
 end
