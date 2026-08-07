@@ -1,5 +1,6 @@
 require "bard/new/cli/new"
 require "bard/new/cli/provision"
 require "bard/new/cli/destroy"
+require "bard/new/staging_autodestruct"
 require "bard/new/cli/reap"
 require "bard/new/cli/remove"

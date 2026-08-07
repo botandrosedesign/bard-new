@@ -34,6 +34,7 @@ module Bard
 
     def stop_services_script
       data_reap = "bard-data-reap-#{@name}"
+      autodestruct = "bard-autodestruct-#{@name}"
       [
         "systemctl --user stop #{@name}.target 2>/dev/null || true",
         "systemctl --user disable #{@name}.target 2>/dev/null || true",
@@ -44,6 +45,11 @@ module Bard
         "systemctl --user disable --now #{data_reap}.timer 2>/dev/null || true",
         "rm -f ~/.config/systemd/user/#{data_reap}.timer ~/.config/systemd/user/#{data_reap}.service",
         "rm -f ~/.local/state/bard/#{data_reap}.sh ~/.local/state/bard/#{@name}.synced",
+        # Likewise the staging auto-destruct timer. No --now: these very steps run from
+        # inside that unit when it fires, and stopping it mid-run would kill the teardown.
+        "systemctl --user disable #{autodestruct}.timer 2>/dev/null || true",
+        "rm -f ~/.config/systemd/user/#{autodestruct}.timer ~/.config/systemd/user/#{autodestruct}.service",
+        "rm -f ~/.local/state/bard/#{autodestruct}.sh",
         "systemctl --user daemon-reload 2>/dev/null || true",
       ].join("; ")
     end

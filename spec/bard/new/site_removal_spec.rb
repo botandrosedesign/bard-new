@@ -22,25 +22,31 @@ describe Bard::SiteRemoval do
     ])
   end
 
-  it "stops the systemd units" do
-    expect(script_for("stopping services")).to eq(
-      "systemctl --user stop acme.target 2>/dev/null || true; " \
-      "systemctl --user disable acme.target 2>/dev/null || true; " \
-      "rm -f ~/.config/systemd/user/acme*.service ~/.config/systemd/user/acme.target; " \
-      "rm -rf ~/.config/systemd/user/acme.target.wants; " \
-      "systemctl --user disable --now bard-data-reap-acme.timer 2>/dev/null || true; " \
-      "rm -f ~/.config/systemd/user/bard-data-reap-acme.timer ~/.config/systemd/user/bard-data-reap-acme.service; " \
-      "rm -f ~/.local/state/bard/bard-data-reap-acme.sh ~/.local/state/bard/acme.synced; " \
-      "systemctl --user daemon-reload 2>/dev/null || true"
-    )
+  it "stops and removes the app's own systemd units" do
+    script = script_for("stopping services")
+    expect(script).to start_with("systemctl --user stop acme.target 2>/dev/null || true; ")
+    expect(script).to include("systemctl --user disable acme.target 2>/dev/null || true")
+    expect(script).to include("rm -f ~/.config/systemd/user/acme*.service ~/.config/systemd/user/acme.target")
+    expect(script).to include("rm -rf ~/.config/systemd/user/acme.target.wants")
+    expect(script).to end_with("systemctl --user daemon-reload 2>/dev/null || true")
   end
 
   # `bard data` arms this timer; if it outlived the site it would fire daily
   # against a deleted directory.
   it "also tears down the bard data expiry timer and its state files" do
     script = script_for("stopping services")
-    expect(script).to include("disable --now bard-data-reap-acme.timer")
+    expect(script).to include("systemctl --user disable --now bard-data-reap-acme.timer")
+    expect(script).to include("rm -f ~/.config/systemd/user/bard-data-reap-acme.timer ~/.config/systemd/user/bard-data-reap-acme.service")
     expect(script).to include("~/.local/state/bard/acme.synced")
+  end
+
+  # These very steps run from inside the autodestruct unit when it fires, so it is
+  # disabled without --now: stopping it mid-run would kill the teardown.
+  it "tears down the staging autodestruct timer without stopping itself mid-run" do
+    script = script_for("stopping services")
+    expect(script).to include("systemctl --user disable bard-autodestruct-acme.timer")
+    expect(script).not_to include("disable --now bard-autodestruct-acme.timer")
+    expect(script).to include("rm -f ~/.local/state/bard/bard-autodestruct-acme.sh")
   end
 
   it "drops the database in a login shell so rvm activates the app's gemset" do

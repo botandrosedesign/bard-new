@@ -16,101 +16,59 @@ describe "bard reap" do
     cli.reap
   end
 
-  describe "installing the reaper" do
-    it "writes the script and units, enables linger, and enables the timer" do
-      expect(target).to receive(:run!).with(/mkdir -p ~\/\.local\/state\/bard/, home: true)
-      expect(target).to receive(:run!).with(%r{cat > ~/\.local/state/bard/bard-reap\.sh}m, home: true)
-      expect(target).to receive(:run!).with(%r{cat > ~/\.config/systemd/user/bard-reap\.service}m, home: true)
-      expect(target).to receive(:run!).with(%r{cat > ~/\.config/systemd/user/bard-reap\.timer}m, home: true)
-      expect(target).to receive(:run!).with(/chmod \+x/, home: true)
-      expect(target).to receive(:run!).with(/loginctl enable-linger/, home: true)
-      expect(target).to receive(:run!).with(/systemctl --user enable --now bard-reap\.timer/, home: true)
-      allow(target).to receive(:run!).with(anything, hash_including(capture: true))
-
-      cli.reap
-    end
-
-    it "installs no gem on the staging box" do
-      allow(target).to receive(:run!) { |cmd, **| expect(cmd).not_to match(/gem install|rvm use/); "" }
-      cli.reap
-    end
+  it "installs the audit script so it can also be run by hand over ssh" do
+    expect(target).to receive(:run!).with(%r{cat > ~/\.local/state/bard/bard-audit\.sh}m, home: true)
+    expect(target).to receive(:run!).with(/chmod \+x/, home: true)
+    allow(target).to receive(:run!)
+    cli.reap
   end
 
-  describe "sweeping" do
-    it "runs the installed script and prints its report" do
-      allow(target).to receive(:run!).and_return("")
-      expect(target).to receive(:run!)
-        .with("$HOME/.local/state/bard/bard-reap.sh", home: true, capture: true)
-        .and_return("Reaped (1)\n  acme  idle 9d\n")
-      expect(cli).to receive(:puts).with(/Reaped \(1\)/)
+  it "runs the audit and prints its report" do
+    allow(target).to receive(:run!).and_return("")
+    expect(target).to receive(:run!)
+      .with("$HOME/.local/state/bard/bard-audit.sh", home: true, capture: true)
+      .and_return("Armed (1)\n  acme  idle 2d, autodestruct armed\n")
+    expect(cli).to receive(:puts).with(/Armed \(1\)/)
 
-      cli.reap
+    cli.reap
+  end
+
+  # The audit is advisory: removal is each site's own opt-in autodestruct timer.
+  it "never installs a timer or tears anything down" do
+    allow(target).to receive(:run!) do |cmd, **|
+      expect(cmd).not_to match(/systemctl --user enable|rm -rf|db:drop|loginctl/)
+      ""
     end
-
-    it "passes --dry-run through to the script" do
-      cli = Bard::CLI.new([], "dry-run": true)
-      allow(cli).to receive(:puts)
-      allow(cli).to receive(:config).and_return(config)
-      allow(target).to receive(:run!).and_return("")
-      expect(target).to receive(:run!)
-        .with("$HOME/.local/state/bard/bard-reap.sh --dry-run", home: true, capture: true)
-
-      cli.reap
-    end
-
-    it "skips the sweep with --install-only" do
-      cli = Bard::CLI.new([], install_only: true)
-      allow(cli).to receive(:puts)
-      allow(cli).to receive(:config).and_return(config)
-      allow(target).to receive(:run!).and_return("")
-      expect(target).not_to receive(:run!).with(anything, hash_including(capture: true))
-
-      cli.reap
-    end
+    cli.reap
   end
 end
 
 describe Bard::StagingReaper do
-  subject(:reaper) { described_class.new }
+  subject(:script) { described_class.new.script }
 
-  it "refuses to run outside staging" do
-    expect(reaper.script).to include('if [ "${RAILS_ENV:-}" != "staging" ]; then')
+  it "needs no bard install on the box" do
+    expect(script).not_to match(/gem install|bundle exec|^\s*bard\s/)
   end
 
-  # The staging box has no bard/bard-cli install, so the script must not reach for one.
-  # (It does shell out to rvm to drop a site's gemset -- rvm is present on staging.)
-  it "installs no gems and never invokes bard" do
-    expect(reaper.script).not_to match(/gem install|bundle exec|^\s*bard\s/)
-  end
-
-  it "keys idleness off git activity and the bard data sync marker" do
-    expect(reaper.script).to include('"$dir/.git/logs/HEAD"')
-    expect(reaper.script).to include('"$STATE/$name.synced"')
-  end
-
-  it "classifies from origin/master, not the local checkout" do
-    expect(reaper.script).to include("git -C \"$dir\" show origin/master:bard.rb")
-  end
-
-  it "reports all four sections" do
-    %w[Reaped Left Unknown Issues].each do |section|
-      expect(reaper.script).to include(%(print_section "#{section}"))
+  it "reports every category" do
+    %w[Armed Candidates Active Permanent Issues].each do |section|
+      expect(script).to include(%(print_section "#{section}"))
     end
   end
 
-  it "embeds the shared SiteRemoval teardown steps against shell placeholders" do
-    Bard::SiteRemoval.new('"$dir"', name: '"$name"').steps.each do |_, cmd|
-      expect(reaper.script).to include(cmd)
-    end
+  it "detects armed sites by their autodestruct timer" do
+    expect(script).to include('"$HOME/.config/systemd/user/bard-autodestruct-$name.timer"')
+  end
+
+  it "never destroys anything" do
+    expect(script).not_to match(/rm -rf|db:drop|systemctl --user (stop|disable)/)
+  end
+
+  it "tells the reader how to make a site ephemeral" do
+    expect(script).to match(/autodestruct <days>/)
   end
 
   it "honours a custom ttl" do
     expect(described_class.new(ttl_days: 30).script).to include("TTL_DAYS=30")
-  end
-
-  it "runs the script from a systemd timer with a staging environment" do
-    expect(reaper.service_unit).to include("Environment=RAILS_ENV=staging")
-    expect(reaper.service_unit).to include("ExecStart=%h/.local/state/bard/bard-reap.sh")
-    expect(reaper.timer_unit).to include("OnCalendar=daily")
   end
 end
