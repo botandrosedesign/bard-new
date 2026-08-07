@@ -30,11 +30,17 @@ module Bard
     private
 
     def stop_services_script
+      data_reap = "bard-data-reap-#{@name}"
       [
         "systemctl --user stop #{@name}.target 2>/dev/null || true",
         "systemctl --user disable #{@name}.target 2>/dev/null || true",
         "rm -f ~/.config/systemd/user/#{@name}*.service ~/.config/systemd/user/#{@name}.target",
         "rm -rf ~/.config/systemd/user/#{@name}.target.wants",
+        # `bard data` arms this per-project data-expiry timer; without this it would
+        # outlive the site and fire daily against a deleted directory.
+        "systemctl --user disable --now #{data_reap}.timer 2>/dev/null || true",
+        "rm -f ~/.config/systemd/user/#{data_reap}.timer ~/.config/systemd/user/#{data_reap}.service",
+        "rm -f ~/.local/state/bard/#{data_reap}.sh ~/.local/state/bard/#{@name}.synced",
         "systemctl --user daemon-reload 2>/dev/null || true",
       ].join("; ")
     end

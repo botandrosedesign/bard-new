@@ -116,10 +116,20 @@ class Bard::CLI
       `git -C #{Shellwords.escape(dir)} show origin/master:bard.rb 2>/dev/null`
     end
 
+    # Idle = the freshest of the same two signals `bard data`'s expiry reaper uses:
+    # git activity (commit/checkout/pull/deploy) and the last `bard data` sync. Both
+    # are immune to bot traffic and need no browser visit.
     def reap_idle_days(dir)
-      marker = File.join(dir, "tmp", "restart.txt")
-      marker = File.join(dir, ".git") unless File.exist?(marker)
-      (Time.now - File.mtime(marker)) / 86400.0
+      mtimes = reap_activity_paths(dir).select { |p| File.exist?(p) }.map { |p| File.mtime(p) }
+      mtimes << File.mtime(dir) if mtimes.empty?
+      (Time.now - mtimes.max) / 86400.0
+    end
+
+    def reap_activity_paths(dir)
+      [
+        File.join(dir, ".git", "logs", "HEAD"),
+        File.join(Dir.home, ".local", "state", "bard", "#{File.basename(dir)}.synced"),
+      ]
     end
 
     def reap_print_report(reaped, left, unknown, issues)

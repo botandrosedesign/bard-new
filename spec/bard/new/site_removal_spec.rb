@@ -28,8 +28,19 @@ describe Bard::SiteRemoval do
       "systemctl --user disable acme.target 2>/dev/null || true; " \
       "rm -f ~/.config/systemd/user/acme*.service ~/.config/systemd/user/acme.target; " \
       "rm -rf ~/.config/systemd/user/acme.target.wants; " \
+      "systemctl --user disable --now bard-data-reap-acme.timer 2>/dev/null || true; " \
+      "rm -f ~/.config/systemd/user/bard-data-reap-acme.timer ~/.config/systemd/user/bard-data-reap-acme.service; " \
+      "rm -f ~/.local/state/bard/bard-data-reap-acme.sh ~/.local/state/bard/acme.synced; " \
       "systemctl --user daemon-reload 2>/dev/null || true"
     )
+  end
+
+  # `bard data` arms this timer; if it outlived the site it would fire daily
+  # against a deleted directory.
+  it "also tears down the bard data expiry timer and its state files" do
+    script = script_for("stopping services")
+    expect(script).to include("disable --now bard-data-reap-acme.timer")
+    expect(script).to include("~/.local/state/bard/acme.synced")
   end
 
   it "drops the database in a login shell so rvm activates the app's gemset" do

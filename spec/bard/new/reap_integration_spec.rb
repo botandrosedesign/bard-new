@@ -34,11 +34,15 @@ describe "bard reap (integration)", :slow do
     git(dir, "push", "-q", "origin", "master")
 
     if staged_days_ago
-      FileUtils.mkdir_p(File.join(dir, "tmp"))
-      restart = File.join(dir, "tmp", "restart.txt")
-      FileUtils.touch(restart)
       t = Time.now - staged_days_ago * 86_400
-      File.utime(t, t, restart)
+      # Age both activity signals the reaper reads: git activity and the `bard data` marker.
+      git_log = File.join(dir, ".git", "logs", "HEAD")
+      File.utime(t, t, git_log) if File.exist?(git_log)
+      marker_dir = File.join(home, ".local", "state", "bard")
+      FileUtils.mkdir_p(marker_dir)
+      marker = File.join(marker_dir, "#{name}.synced")
+      FileUtils.touch(marker)
+      File.utime(t, t, marker)
     end
     dir
   end
