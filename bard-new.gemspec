@@ -15,7 +15,11 @@ Gem::Specification.new do |spec|
   spec.test_files    = spec.files.grep(%r{^(test|spec|features)/})
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "bard-cli", ">= 1.1.0"
+  # bard (config core) is public and is a real runtime dependency: Bard::Config parses
+  # each site's bard.rb. Bard::CLI itself comes from the private bard-cli gem, which
+  # loads this plugin — a public gem must not declare a private dependency, so bard-cli
+  # is a dev/test-only dependency in the Gemfile.
+  spec.add_dependency "bard", "~> 3.0"
 
   spec.add_development_dependency "rake"
   spec.add_development_dependency "rspec"
