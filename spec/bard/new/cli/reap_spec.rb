@@ -1,145 +1,116 @@
 require "spec_helper"
 
 describe "bard reap" do
+  let(:target) { double("staging", key: :staging, require_capability!: nil, run!: "") }
+  let(:config) { double("config") }
   let(:cli) { Bard::CLI.new }
-
-  around do |example|
-    original = ENV["RAILS_ENV"]
-    ENV["RAILS_ENV"] = "staging"
-    example.run
-    ENV["RAILS_ENV"] = original
-  end
 
   before do
     allow(cli).to receive(:puts)
-    allow(cli).to receive(:green) { |s| s }
-    allow(cli).to receive(:red) { |s| s }
-    allow(cli).to receive(:ensure_reaper_timer)
+    allow(cli).to receive(:config).and_return(config)
+    allow(config).to receive(:[]).with(:staging).and_return(target)
   end
 
-  describe "guard" do
-    it "refuses to run when RAILS_ENV is not staging" do
-      ENV["RAILS_ENV"] = "development"
-      expect { cli.reap }.to raise_error(Thor::Error, /refuses to run outside a staging environment/)
-    end
-
-    it "runs anyway with --force" do
-      ENV["RAILS_ENV"] = "development"
-      cli = Bard::CLI.new([], force: true)
-      allow(cli).to receive(:puts)
-      allow(cli).to receive(:green) { |s| s }
-      allow(cli).to receive(:red) { |s| s }
-      allow(cli).to receive(:ensure_reaper_timer)
-      allow(cli).to receive(:reap_candidates).and_return([])
-      expect { cli.reap }.not_to raise_error
-    end
+  it "requires ssh on the staging target" do
+    expect(target).to receive(:require_capability!).with(:ssh)
+    cli.reap
   end
 
-  describe "self-installing timer" do
-    before { allow(cli).to receive(:reap_candidates).and_return([]) }
+  describe "installing the reaper" do
+    it "writes the script and units, enables linger, and enables the timer" do
+      expect(target).to receive(:run!).with(/mkdir -p ~\/\.local\/state\/bard/, home: true)
+      expect(target).to receive(:run!).with(%r{cat > ~/\.local/state/bard/bard-reap\.sh}m, home: true)
+      expect(target).to receive(:run!).with(%r{cat > ~/\.config/systemd/user/bard-reap\.service}m, home: true)
+      expect(target).to receive(:run!).with(%r{cat > ~/\.config/systemd/user/bard-reap\.timer}m, home: true)
+      expect(target).to receive(:run!).with(/chmod \+x/, home: true)
+      expect(target).to receive(:run!).with(/loginctl enable-linger/, home: true)
+      expect(target).to receive(:run!).with(/systemctl --user enable --now bard-reap\.timer/, home: true)
+      allow(target).to receive(:run!).with(anything, hash_including(capture: true))
 
-    it "ensures its own timer on a real run" do
-      expect(cli).to receive(:ensure_reaper_timer)
       cli.reap
     end
 
-    it "does not touch the box on a dry run" do
+    it "installs no gem on the staging box" do
+      allow(target).to receive(:run!) { |cmd, **| expect(cmd).not_to match(/gem install|rvm use/); "" }
+      cli.reap
+    end
+  end
+
+  describe "sweeping" do
+    it "runs the installed script and prints its report" do
+      allow(target).to receive(:run!).and_return("")
+      expect(target).to receive(:run!)
+        .with("$HOME/.local/state/bard/bard-reap.sh", home: true, capture: true)
+        .and_return("Reaped (1)\n  acme  idle 9d\n")
+      expect(cli).to receive(:puts).with(/Reaped \(1\)/)
+
+      cli.reap
+    end
+
+    it "passes --dry-run through to the script" do
       cli = Bard::CLI.new([], "dry-run": true)
       allow(cli).to receive(:puts)
-      allow(cli).to receive(:green) { |s| s }
-      allow(cli).to receive(:red) { |s| s }
-      allow(cli).to receive(:reap_candidates).and_return([])
-      expect(cli).not_to receive(:ensure_reaper_timer)
-      cli.reap
-    end
-
-    describe "#reaper_install_script" do
-      it "pins ruby, self-updates bard-new, and enables linger + the timer" do
-        script = cli.send(:reaper_install_script)
-        expect(script).to include("ExecStartPre=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap --create && gem install bard-new'")
-        expect(script).to include("ExecStart=/bin/bash -lc 'rvm use ruby-3.3.4@bard-reap && bard reap'")
-        expect(script).to include("loginctl enable-linger")
-        expect(script).to include("systemctl --user enable --now bard-reap.timer")
-      end
-    end
-  end
-
-  describe "#reap_classify" do
-    it "is ephemeral when origin/master declares a distinct production" do
-      allow(cli).to receive(:reap_origin_bard_rb).and_return(<<~RUBY)
-        target :production do
-          ssh "deploy@prod.example.com:22022"
-        end
-      RUBY
-      expect(cli.send(:reap_classify, "/home/www/acme", "acme")).to eq([:ephemeral, nil])
-    end
-
-    it "is unknown when origin/master:bard.rb is empty or unreadable" do
-      allow(cli).to receive(:reap_origin_bard_rb).and_return("")
-      expect(cli.send(:reap_classify, "/home/www/acme", "acme").first).to eq(:unknown)
-    end
-
-    it "is permanent when the config defines no distinct production" do
-      allow(cli).to receive(:reap_origin_bard_rb).and_return("# a permanent resident, no production target\n")
-      expect(cli.send(:reap_classify, "/home/www/acme", "acme")).to eq([:permanent, nil])
-    end
-
-    it "is unknown when the config cannot be evaluated" do
-      allow(cli).to receive(:reap_origin_bard_rb).and_return("this is not valid ruby <<<")
-      status, reason = cli.send(:reap_classify, "/home/www/acme", "acme")
-      expect(status).to eq(:unknown)
-      expect(reason).to match(/error reading config/)
-    end
-  end
-
-  describe "sweep" do
-    before do
-      allow(cli).to receive(:reap_candidates).and_return(%w[ripe fresh perm broken])
-      allow(cli).to receive(:reap_missing_files) do |dir|
-        dir.end_with?("broken") ? %w[.git] : []
-      end
-      allow(cli).to receive(:reap_classify) do |dir, name|
-        case name
-        when "ripe", "fresh" then [:ephemeral, nil]
-        when "perm" then [:permanent, nil]
-        end
-      end
-      allow(cli).to receive(:reap_idle_days) do |dir|
-        dir.end_with?("ripe") ? 9.0 : 2.0
-      end
-    end
-
-    it "reaps ripe ephemeral sites, keeps fresh ones, and flags issues without failing" do
-      removal = instance_double(Bard::SiteRemoval, call: nil)
-      expect(Bard::SiteRemoval).to receive(:new).with(File.join(Dir.home, "ripe")).and_return(removal)
-      expect(Bard::SiteRemoval).not_to receive(:new).with(File.join(Dir.home, "fresh"))
-      expect(cli).to receive(:puts).with(a_string_matching(/Issues \(1\)/))
-      expect(cli).not_to receive(:exit)
+      allow(cli).to receive(:config).and_return(config)
+      allow(target).to receive(:run!).and_return("")
+      expect(target).to receive(:run!)
+        .with("$HOME/.local/state/bard/bard-reap.sh --dry-run", home: true, capture: true)
 
       cli.reap
     end
 
-    it "does not reap anything on a dry run" do
-      cli = Bard::CLI.new([], "dry-run": true)
+    it "skips the sweep with --install-only" do
+      cli = Bard::CLI.new([], install_only: true)
       allow(cli).to receive(:puts)
-      allow(cli).to receive(:green) { |s| s }
-      allow(cli).to receive(:red) { |s| s }
-      allow(cli).to receive(:reap_candidates).and_return(%w[ripe])
-      allow(cli).to receive(:reap_missing_files).and_return([])
-      allow(cli).to receive(:reap_classify).and_return([:ephemeral, nil])
-      allow(cli).to receive(:reap_idle_days).and_return(30.0)
+      allow(cli).to receive(:config).and_return(config)
+      allow(target).to receive(:run!).and_return("")
+      expect(target).not_to receive(:run!).with(anything, hash_including(capture: true))
 
-      expect(Bard::SiteRemoval).not_to receive(:new)
       cli.reap
     end
   end
+end
 
-  describe "#reap_candidates" do
-    it "ignores dotfiles and non-directories" do
-      allow(Dir).to receive(:children).with(Dir.home).and_return(%w[.config acme notes.txt beta])
-      allow(File).to receive(:directory?).and_return(true)
-      allow(File).to receive(:directory?).with(File.join(Dir.home, "notes.txt")).and_return(false)
-      expect(cli.send(:reap_candidates)).to eq(%w[acme beta])
+describe Bard::StagingReaper do
+  subject(:reaper) { described_class.new }
+
+  it "refuses to run outside staging" do
+    expect(reaper.script).to include('if [ "${RAILS_ENV:-}" != "staging" ]; then')
+  end
+
+  # The staging box has no bard/bard-cli install, so the script must not reach for one.
+  # (It does shell out to rvm to drop a site's gemset -- rvm is present on staging.)
+  it "installs no gems and never invokes bard" do
+    expect(reaper.script).not_to match(/gem install|bundle exec|^\s*bard\s/)
+  end
+
+  it "keys idleness off git activity and the bard data sync marker" do
+    expect(reaper.script).to include('"$dir/.git/logs/HEAD"')
+    expect(reaper.script).to include('"$STATE/$name.synced"')
+  end
+
+  it "classifies from origin/master, not the local checkout" do
+    expect(reaper.script).to include("git -C \"$dir\" show origin/master:bard.rb")
+  end
+
+  it "reports all four sections" do
+    %w[Reaped Left Unknown Issues].each do |section|
+      expect(reaper.script).to include(%(print_section "#{section}"))
     end
+  end
+
+  it "embeds the shared SiteRemoval teardown steps against shell placeholders" do
+    Bard::SiteRemoval.new('"$dir"', name: '"$name"').steps.each do |_, cmd|
+      expect(reaper.script).to include(cmd)
+    end
+  end
+
+  it "honours a custom ttl" do
+    expect(described_class.new(ttl_days: 30).script).to include("TTL_DAYS=30")
+  end
+
+  it "runs the script from a systemd timer with a staging environment" do
+    expect(reaper.service_unit).to include("Environment=RAILS_ENV=staging")
+    expect(reaper.service_unit).to include("ExecStart=%h/.local/state/bard/bard-reap.sh")
+    expect(reaper.timer_unit).to include("OnCalendar=daily")
   end
 end

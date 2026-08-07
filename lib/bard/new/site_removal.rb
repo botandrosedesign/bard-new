@@ -7,9 +7,12 @@ module Bard
   # and `bard reap` / `bard remove` (which run them locally). Exposed as ordered
   # [label, shell-command] steps so each caller executes them in its own context.
   class SiteRemoval
-    def initialize(dir = Dir.pwd)
+    # `name` is normally derived from `dir`, but both can be given as shell
+    # placeholders (e.g. "$DIR" / "$NAME") to emit these steps into a shell script
+    # that fills them in per site — see Bard::StagingReaper.
+    def initialize(dir = Dir.pwd, name: nil)
       @dir = dir.to_s
-      @name = File.basename(@dir)
+      @name = name || File.basename(@dir)
     end
 
     def steps

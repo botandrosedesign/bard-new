@@ -3,13 +3,18 @@ require "open3"
 require "fileutils"
 require "tmpdir"
 
-# Exercises the real `bard reap` command end-to-end against a seeded $HOME of
-# actual git repos: the classifier really fetches each site's origin/master:bard.rb
-# and the report buckets are produced for real. Runs --dry-run so nothing is
-# destroyed (no sudo/nginx/rm), which is what makes it safe to run on a dev box.
-describe "bard reap (integration)", :slow do
+# Runs the real generated reaper script against a seeded $HOME of actual git repos.
+# This is the artifact that ships to the staging box, so it is exercised as bash --
+# no ruby, no gems -- exactly as systemd will run it. Uses --dry-run so nothing is
+# destroyed, which is what makes it safe to run on a dev machine.
+describe "the staging reaper script", :slow do
   let(:home) { Dir.mktmpdir("bard-reap-home") }
-  let(:root) { File.expand_path("../../..", __dir__) }
+  let(:script) { File.join(home, "bard-reap.sh") }
+
+  before do
+    File.write(script, Bard::StagingReaper.new.script)
+    FileUtils.chmod(0o755, script)
+  end
 
   after { FileUtils.remove_entry(home) if File.exist?(home) }
 
@@ -19,7 +24,7 @@ describe "bard reap (integration)", :slow do
   end
 
   # Creates ~/<name> as a git checkout whose origin/master holds the given bard.rb.
-  def seed_site(name, bard_rb:, staged_days_ago:)
+  def seed_site(name, bard_rb:, idle_days: nil)
     dir = File.join(home, name)
     origin = File.join(home, ".origins", "#{name}.git")
     FileUtils.mkdir_p(origin)
@@ -33,9 +38,8 @@ describe "bard reap (integration)", :slow do
     git(dir, "remote", "add", "origin", origin)
     git(dir, "push", "-q", "origin", "master")
 
-    if staged_days_ago
-      t = Time.now - staged_days_ago * 86_400
-      # Age both activity signals the reaper reads: git activity and the `bard data` marker.
+    if idle_days
+      t = Time.now - idle_days * 86_400
       git_log = File.join(dir, ".git", "logs", "HEAD")
       File.utime(t, t, git_log) if File.exist?(git_log)
       marker_dir = File.join(home, ".local", "state", "bard")
@@ -55,31 +59,45 @@ describe "bard reap (integration)", :slow do
     RUBY
   end
 
-  # HOME is overridden only for the bard process (not the login shell), so rvm
-  # still resolves from the real home and the bard-new gemset activates on cd.
-  def run_reap(rails_env: "staging", flags: "--dry-run")
-    Open3.capture2e("bash", "-lc",
-      "cd #{root} && HOME=#{home} RAILS_ENV=#{rails_env} bundle exec bard reap #{flags}")
+  def run_reaper(*args, rails_env: "staging")
+    Open3.capture2e({ "HOME" => home, "RAILS_ENV" => rails_env }, "bash", script, *args)
   end
 
   it "reaps ripe ephemeral sites, keeps fresh ones, and flags permanents and broken dirs" do
-    seed_site("ripe",  bard_rb: distinct_production, staged_days_ago: 9)
-    seed_site("fresh", bard_rb: distinct_production, staged_days_ago: 1)
-    seed_site("perm",  bard_rb: "# permanent resident, no production\n", staged_days_ago: 30)
+    seed_site("ripe",  bard_rb: distinct_production, idle_days: 9)
+    seed_site("fresh", bard_rb: distinct_production, idle_days: 1)
+    seed_site("perm",  bard_rb: "# permanent resident, no production\n", idle_days: 30)
     FileUtils.mkdir_p(File.join(home, "broken")) # no bard.rb / .git
 
-    out, status = run_reap
+    out, status = run_reaper("--dry-run")
 
     expect(out).to match(/Would reap \(1\).*\bripe\b/m)
     expect(out).to match(/Left \(1\).*\bfresh\b/m)
     expect(out).to match(/Unknown \(1\).*\bperm\b/m)
     expect(out).to match(/Issues \(1\).*\bbroken\b/m)
-    expect(status.exitstatus).to eq(0) # issues are flagged but not fatal
+    expect(status.exitstatus).to eq(0)
+  end
+
+  it "leaves every site in place on a dry run" do
+    seed_site("ripe", bard_rb: distinct_production, idle_days: 30)
+    run_reaper("--dry-run")
+    expect(File.directory?(File.join(home, "ripe"))).to be(true)
+  end
+
+  it "honours --ttl" do
+    seed_site("recent", bard_rb: distinct_production, idle_days: 3)
+    out, _ = run_reaper("--dry-run", "--ttl=2")
+    expect(out).to match(/Would reap \(1\).*\brecent\b/m)
   end
 
   it "refuses to run outside a staging environment" do
-    out, status = run_reap(rails_env: "development")
-    expect(out).to match(/refuses to run outside a staging environment/)
-    expect(status.exitstatus).not_to eq(0)
+    out, status = run_reaper("--dry-run", rails_env: "development")
+    expect(out).to match(/refusing to run outside a staging environment/)
+    expect(status.exitstatus).to eq(1)
+  end
+
+  it "is valid bash" do
+    _, status = Open3.capture2e("bash", "-n", script)
+    expect(status.exitstatus).to eq(0)
   end
 end
