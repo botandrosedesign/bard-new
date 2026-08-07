@@ -8,8 +8,12 @@ Gem::Specification.new do |spec|
   spec.authors       = ["Micah Geisel"]
   spec.email         = ["micah@botandrose.com"]
   spec.summary       = "Project creation and server provisioning for bard."
-  spec.homepage      = "http://github.com/botandrose/bard-new"
+  spec.homepage      = "https://github.com/botandrosedesign/bard-new"
   spec.license       = "MIT"
+
+  # Internal tooling: publishes to GitHub Packages alongside bard-cli, not rubygems.org.
+  spec.metadata["allowed_push_host"] = "https://rubygems.pkg.github.com"
+  spec.metadata["github_repo"]       = "ssh://github.com/botandrosedesign/bard-new"
 
   spec.files         = `git ls-files -z`.split("\x0")
   spec.test_files    = spec.files.grep(%r{^(test|spec|features)/})

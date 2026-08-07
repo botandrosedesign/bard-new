@@ -8,6 +8,16 @@ jobs:
         ruby: [ "3.3", "3.4", "4.0" ]
 
     runs-on: ubuntu-latest
+
+    # bard-cli is a private gem in this org's GitHub Packages registry. Same-org, so the
+    # built-in GITHUB_TOKEN suffices -- no PAT secret to manage.
+    permissions:
+      contents: read
+      packages: read
+
+    env:
+      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: "x-access-token:${{ secrets.GITHUB_TOKEN }}"
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
