@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    bard-new (0.1.2)
+    bard-new (0.2.0)
       bard-cli (>= 1.1.0)
 
 GEM
