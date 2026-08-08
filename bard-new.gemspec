@@ -24,6 +24,8 @@ Gem::Specification.new do |spec|
   # loads this plugin — a public gem must not declare a private dependency, so bard-cli
   # is a dev/test-only dependency in the Gemfile.
   spec.add_dependency "bard", "~> 3.0"
+  # For Duration, so bard.rb can say `expires_after 7.days`.
+  spec.add_dependency "activesupport"
 
   spec.add_development_dependency "rake"
   spec.add_development_dependency "rspec"

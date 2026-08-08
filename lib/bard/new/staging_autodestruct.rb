@@ -1,32 +1,45 @@
+require "active_support/core_ext/integer/time"
+require "active_support/core_ext/numeric/time"
 require "bard/new/site_removal"
 
 class Bard::Target
-  # Opt-in on a staging target: `autodestruct 7` removes the site after 7 idle days.
-  def autodestruct(days = nil)
-    days.nil? ? @autodestruct : @autodestruct = days
+  # Opt-in on a staging target: `expires_after 7.days` removes the site once it has been
+  # idle that long. Requires a Duration, not a bare number: `expires_after 7` would be
+  # seven *seconds*, which would wipe the site on the next timer run.
+  def expires_after(duration = nil)
+    return @expires_after if duration.nil?
+    unless duration.is_a?(ActiveSupport::Duration)
+      raise ArgumentError, "expires_after needs a duration, e.g. `expires_after 7.days` (got #{duration.inspect})"
+    end
+    @expires_after = duration
   end
 end
 
 module Bard
   # Per-project staging auto-destruct. `bard stage` arms this on targets that opt in
-  # via `autodestruct <days>`; it installs a self-contained bash script and a systemd
+  # via `expires_after <duration>`; it installs a self-contained bash script and a systemd
   # --user timer on the server. Deliberately gem-free: the staging box has no
   # bard/bard-cli install, so what ships is a rendered string. Teardown comes from
   # SiteRemoval, shared with `bard destroy` and `bard remove`.
   class StagingAutodestruct
     def self.arm(target, project_name)
-      days = target.respond_to?(:autodestruct) ? target.autodestruct : nil
-      return unless days
-      new(target, project_name, days).arm
+      duration = target.respond_to?(:expires_after) ? target.expires_after : nil
+      return unless duration
+      new(target, project_name, duration).arm
     end
 
-    attr_reader :target, :name, :days
+    attr_reader :target, :name, :duration
 
-    def initialize(target, name, days)
+    def initialize(target, name, duration)
       @target = target
       @name = name
-      @days = days
+      @duration = duration
     end
+
+    # "7 days", "36 hours" -- for the console notice and the unit descriptions.
+    def humanized = duration.inspect
+
+    def idle_minutes = duration.to_i / 60
 
     def unit = "bard-autodestruct-#{name}"
     def dir = "$HOME/#{target.path}"
@@ -57,7 +70,7 @@ module Bard
         DIR="#{dir}"
         NAME="#{name}"
         STATE="$HOME/.local/state/bard"
-        IDLE_MIN=$(( #{days} * 1440 ))
+        IDLE_MIN=#{idle_minutes}
 
         [ -d "$DIR" ] || exit 0
 
@@ -72,7 +85,7 @@ module Bard
         [ -n "$newest" ] || exit 0
         [ -n "$(find "$newest" -maxdepth 0 -mmin +$IDLE_MIN 2>/dev/null)" ] || exit 0
 
-        echo "bard: $NAME has been idle for over #{days} days; removing it."
+        echo "bard: $NAME has been idle for over #{humanized}; removing it."
         #{teardown_steps.map { |label, cmd| "# #{label}\n( #{cmd} ) >/dev/null 2>&1" }.join("\n")}
       SH
     end

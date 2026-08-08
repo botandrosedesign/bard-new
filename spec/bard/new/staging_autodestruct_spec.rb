@@ -5,24 +5,24 @@ describe Bard::StagingAutodestruct do
 
   describe ".arm" do
     it "does nothing when the target has not opted in" do
-      allow(target).to receive(:autodestruct).and_return(nil)
+      allow(target).to receive(:expires_after).and_return(nil)
       expect(target).not_to receive(:run!)
       expect(described_class.arm(target, "acme")).to be_nil
     end
 
-    it "arms when the target declares autodestruct" do
-      allow(target).to receive(:autodestruct).and_return(7)
+    it "arms when the target declares expires_after" do
+      allow(target).to receive(:expires_after).and_return(7.days)
       expect(described_class.arm(target, "acme")).to be_a(described_class)
     end
 
-    it "is inert on a target with no autodestruct DSL at all" do
+    it "is inert on a target with no expires_after DSL at all" do
       plain = double("target")
       expect(described_class.arm(plain, "acme")).to be_nil
     end
   end
 
   describe "#arm" do
-    subject(:autodestruct) { described_class.new(target, "acme", 7) }
+    subject(:autodestruct) { described_class.new(target, "acme", 7.days) }
 
     it "writes the script and units, enables linger, and enables the timer" do
       expect(target).to receive(:run!).with(/mkdir -p ~\/\.local\/state\/bard/, home: true)
@@ -43,7 +43,7 @@ describe Bard::StagingAutodestruct do
   end
 
   describe "#script" do
-    subject(:script) { described_class.new(target, "acme", 7).script }
+    subject(:script) { described_class.new(target, "acme", 7.days).script }
 
     it "needs no bard install on the box" do
       expect(script).not_to match(/gem install|bundle exec|^\s*bard\s/)
@@ -54,9 +54,10 @@ describe Bard::StagingAutodestruct do
       expect(script).to include('"$STATE/$NAME.synced"')
     end
 
-    it "converts the configured days into an idle window" do
-      expect(script).to include("IDLE_MIN=$(( 7 * 1440 ))")
-      expect(described_class.new(target, "acme", 30).script).to include("IDLE_MIN=$(( 30 * 1440 ))")
+    it "converts the duration into an idle window in minutes" do
+      expect(script).to include("IDLE_MIN=10080")
+      expect(described_class.new(target, "acme", 30.days).script).to include("IDLE_MIN=43200")
+      expect(described_class.new(target, "acme", 36.hours).script).to include("IDLE_MIN=2160")
     end
 
     it "does nothing when there is no activity signal to measure" do
@@ -71,7 +72,7 @@ describe Bard::StagingAutodestruct do
   end
 
   describe "units" do
-    subject(:autodestruct) { described_class.new(target, "acme", 7) }
+    subject(:autodestruct) { described_class.new(target, "acme", 7.days) }
 
     it "runs the script daily in a staging environment" do
       expect(autodestruct.service_unit).to include("Environment=RAILS_ENV=staging")
@@ -81,14 +82,23 @@ describe Bard::StagingAutodestruct do
   end
 end
 
-describe "autodestruct target DSL" do
+describe "expires_after target DSL" do
   let(:config) { Bard::Config.new("acme", source: source) }
 
   context "when declared" do
-    let(:source) { "target :staging do\n  autodestruct 7\nend\n" }
+    let(:source) { "target :staging do\n  expires_after 7.days\nend\n" }
 
-    it "reads back the configured days" do
-      expect(config[:staging].autodestruct).to eq(7)
+    it "reads back the configured duration" do
+      expect(config[:staging].expires_after).to eq(7.days)
+    end
+  end
+
+  # `expires_after 7` would be seven seconds, wiping the site on the next timer run.
+  context "when given a bare number instead of a duration" do
+    let(:source) { "target :staging do\n  expires_after 7\nend\n" }
+
+    it "refuses, naming the correct form" do
+      expect { config }.to raise_error(ArgumentError, /expires_after 7\.days/)
     end
   end
 
@@ -96,7 +106,7 @@ describe "autodestruct target DSL" do
     let(:source) { "target :staging do\nend\n" }
 
     it "is nil, so nothing is armed" do
-      expect(config[:staging].autodestruct).to be_nil
+      expect(config[:staging].expires_after).to be_nil
     end
   end
 end

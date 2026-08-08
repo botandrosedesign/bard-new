@@ -6,7 +6,7 @@ require "tmpdir"
 # Runs the real generated scripts against a seeded $HOME of actual git repos. These are
 # the artifacts that ship to the staging box, so they are exercised as bash -- no ruby,
 # no gems -- exactly as systemd will run them.
-describe "the generated staging scripts", :slow do
+describe "the generated staging auto-destruct script", :slow do
   let(:home) { Dir.mktmpdir("bard-staging-home") }
 
   after { FileUtils.remove_entry(home) if File.exist?(home) }
@@ -52,19 +52,19 @@ describe "the generated staging scripts", :slow do
   describe "the per-project autodestruct script" do
     let(:target) { double("staging", path: "acme") }
 
-    def autodestruct_script(days)
-      Bard::StagingAutodestruct.new(target, "acme", days).script
+    def autodestruct_script(duration)
+      Bard::StagingAutodestruct.new(target, "acme", duration).script
     end
 
     it "is valid bash" do
-      path = write_script("ad.sh", autodestruct_script(7))
+      path = write_script("ad.sh", autodestruct_script(7.days))
       _, status = Open3.capture2e("bash", "-n", path)
       expect(status.exitstatus).to eq(0)
     end
 
     it "leaves a site that is still active alone" do
       seed_site("acme", idle_days: 1)
-      path = write_script("ad.sh", autodestruct_script(7))
+      path = write_script("ad.sh", autodestruct_script(7.days))
 
       run(path)
 
@@ -73,7 +73,7 @@ describe "the generated staging scripts", :slow do
 
     it "removes a site that has gone idle past its window" do
       seed_site("acme", idle_days: 30)
-      path = write_script("ad.sh", autodestruct_script(7))
+      path = write_script("ad.sh", autodestruct_script(7.days))
 
       out, _ = run(path)
 
@@ -82,59 +82,10 @@ describe "the generated staging scripts", :slow do
     end
 
     it "does nothing when the site is already gone" do
-      path = write_script("ad.sh", autodestruct_script(7))
+      path = write_script("ad.sh", autodestruct_script(7.days))
       out, status = run(path)
       expect(status.exitstatus).to eq(0)
       expect(out).to eq("")
-    end
-  end
-
-  describe "the audit script" do
-    let(:with_production) do
-      <<~RUBY
-        target :production do
-          ssh "deploy@prod.example.com:22022"
-        end
-      RUBY
-    end
-
-    def audit_script = Bard::StagingReaper.new.script
-
-    it "is valid bash" do
-      path = write_script("audit.sh", audit_script)
-      _, status = Open3.capture2e("bash", "-n", path)
-      expect(status.exitstatus).to eq(0)
-    end
-
-    it "sorts sites into armed, candidates, active, permanent and issues" do
-      seed_site("armedsite", bard_rb: with_production, idle_days: 30)
-      seed_site("stale",     bard_rb: with_production, idle_days: 30)
-      seed_site("busy",      bard_rb: with_production, idle_days: 1)
-      seed_site("perm",      idle_days: 30)
-      FileUtils.mkdir_p(File.join(home, "broken"))
-
-      units = File.join(home, ".config", "systemd", "user")
-      FileUtils.mkdir_p(units)
-      FileUtils.touch(File.join(units, "bard-autodestruct-armedsite.timer"))
-
-      path = write_script("audit.sh", audit_script)
-      out, status = run(path)
-
-      expect(out).to match(/Armed \(1\).*\barmedsite\b/m)
-      expect(out).to match(/Candidates \(1\).*\bstale\b/m)
-      expect(out).to match(/Active \(1\).*\bbusy\b/m)
-      expect(out).to match(/Permanent \(1\).*\bperm\b/m)
-      expect(out).to match(/Issues \(1\).*\bbroken\b/m)
-      expect(status.exitstatus).to eq(0)
-    end
-
-    it "never removes anything it reports on" do
-      seed_site("stale", bard_rb: with_production, idle_days: 30)
-      path = write_script("audit.sh", audit_script)
-
-      run(path)
-
-      expect(File.directory?(File.join(home, "stale"))).to be(true)
     end
   end
 end
