@@ -99,6 +99,42 @@ describe "bard remove" do
     cli.remove
   end
 
+  # The staging server has no bard install, so a remote removal has to be driven from
+  # here: the steps go over ssh as plain shell.
+  context "with --target" do
+    let(:cli) { Bard::CLI.new([], yes: true, target: "staging") }
+    let(:target) { double("staging", key: :staging, path: "acme", require_capability!: nil) }
+    let(:config) { double("config") }
+
+    before do
+      allow(cli).to receive(:puts)
+      allow(cli).to receive(:print)
+      allow(cli).to receive(:yellow).and_return("")
+      allow(cli).to receive(:red).and_return("")
+      allow(cli).to receive(:config).and_return(config)
+      allow(config).to receive(:[]).with(:staging).and_return(target)
+    end
+
+    it "requires ssh on the target" do
+      allow(target).to receive(:run!)
+      expect(target).to receive(:require_capability!).with(:ssh)
+      cli.remove
+    end
+
+    it "runs every teardown step against the target's directory, not the cwd" do
+      Bard::SiteRemoval.new("~/acme").steps.each do |_, script|
+        expect(target).to receive(:run!).with(script, home: true, quiet: true)
+      end
+      cli.remove
+    end
+
+    it "never runs the teardown locally" do
+      allow(target).to receive(:run!)
+      expect_any_instance_of(Bard::SiteRemoval).not_to receive(:call)
+      cli.remove
+    end
+  end
+
   context "without --yes" do
     let(:cli) { Bard::CLI.new }
 
