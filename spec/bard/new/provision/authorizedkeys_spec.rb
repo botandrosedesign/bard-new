@@ -25,6 +25,41 @@ describe Bard::Provision::AuthorizedKeys do
       authorized_keys.call
     end
 
+    # Overwriting with only the canonical set revokes the key this very run is
+    # connected with, so every later provision step gets "Permission denied".
+    context "when provisioning with a key outside the canonical set" do
+      let(:key_path) { File.expand_path("../../../acceptance/docker/test_key", __dir__) }
+
+      before { allow(provision_server).to receive(:ssh_key).and_return(key_path) }
+
+      it "keeps that key authorized alongside the canonical set" do
+        pubkey = File.read("#{key_path}.pub").strip
+        expect(provision_server).to receive(:run!).with(a_string_including(pubkey), home: true)
+
+        authorized_keys.call
+      end
+
+      it "still writes every canonical key" do
+        expect(provision_server).to receive(:run!) do |script, **|
+          described_class::KEYS.each { |k| expect(script).to include(k) }
+        end
+
+        authorized_keys.call
+      end
+    end
+
+    context "when provisioning with a canonical key" do
+      before { allow(provision_server).to receive(:ssh_key).and_return(nil) }
+
+      it "writes the canonical set unchanged" do
+        expect(provision_server).to receive(:run!) do |script, **|
+          expect(script.scan(/sk-ssh-ed25519/).size).to eq(described_class::KEYS.size)
+        end
+
+        authorized_keys.call
+      end
+    end
+
     it "prints status messages" do
       allow(provision_server).to receive(:run!)
       expect(authorized_keys).to receive(:print).with("Authorized Keys:")

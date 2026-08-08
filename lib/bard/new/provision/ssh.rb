@@ -54,11 +54,13 @@ class Bard::Provision::SSH < Bard::Provision
 
   def ssh_known_host? ssh_uri
     port ||= ssh_uri.port || 22
-    system "grep -q \"$(ssh-keyscan -t ed25519 -p#{port} #{ssh_uri.host} 2>/dev/null | cut -d ' ' -f 2-3)\" ~/.ssh/known_hosts"
+    system "grep -q \"$(ssh-keyscan -t ed25519 -p#{port} #{ssh_uri.host} 2>/dev/null | cut -d ' ' -f 2-3)\" ~/.ssh/known_hosts 2>/dev/null"
   end
 
   def add_ssh_known_host! ssh_uri
     port ||= ssh_uri.port || 22
+    # A fresh machine (a CI runner, say) has no ~/.ssh yet.
+    system "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
     system "ssh-keyscan -p#{port} -H #{ssh_uri.host} >> ~/.ssh/known_hosts 2>/dev/null"
   end
 

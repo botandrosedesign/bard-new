@@ -5,11 +5,27 @@ class Bard::Provision::AuthorizedKeys < Bard::Provision
     print "Authorized Keys:"
 
     provision_server.run! [
-      %(echo "#{KEYS.join("\n")}" > ~/.ssh/authorized_keys),
+      "mkdir -p ~/.ssh",
+      %(echo "#{authorized_keys.join("\n")}" > ~/.ssh/authorized_keys),
       "chmod 600 ~/.ssh/authorized_keys",
     ].join(" && "), home: true
 
     puts " ✓"
+  end
+
+  private
+
+  # Never revoke the key this provision run is connected with: the remaining steps use
+  # the same connection, and locking ourselves out mid-run leaves the box half-built.
+  # A no-op when provisioning with one of the canonical keys, which is the normal case.
+  def authorized_keys
+    KEYS | Array(provisioning_public_key)
+  end
+
+  def provisioning_public_key
+    path = provision_server.respond_to?(:ssh_key) && provision_server.ssh_key
+    return unless path && File.exist?("#{path}.pub")
+    File.read("#{path}.pub").strip
   end
 
   KEYS = [

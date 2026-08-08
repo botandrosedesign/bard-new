@@ -182,7 +182,7 @@ describe Bard::Provision::SSH do
 
     describe "#ssh_known_host?" do
       it "checks if host is in known_hosts file" do
-        expected_command = 'grep -q "$(ssh-keyscan -t ed25519 -p22 example.com 2>/dev/null | cut -d \' \' -f 2-3)" ~/.ssh/known_hosts'
+        expected_command = 'grep -q "$(ssh-keyscan -t ed25519 -p22 example.com 2>/dev/null | cut -d \' \' -f 2-3)" ~/.ssh/known_hosts 2>/dev/null'
         expect(ssh_provisioner).to receive(:system).with(expected_command)
 
         ssh_provisioner.send(:ssh_known_host?, provision_ssh_uri)
