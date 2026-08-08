@@ -2,6 +2,13 @@ require "spec_helper"
 
 describe "bard destroy" do
   let(:cli) { Bard::CLI.new([], yes: true) }
+  let(:dconfig) { double("config") }
+
+  # Default config: staging and production are the same target until a distinct
+  # production is declared.
+  let(:staging) { double("staging", key: :staging, path: "testproject", has_capability?: true) }
+  let(:production) { staging }
+  let(:local) { double("local", key: :local, has_capability?: false) }
 
   before do
     allow(cli).to receive(:puts)
@@ -9,29 +16,42 @@ describe "bard destroy" do
     allow(cli).to receive(:green).and_return("")
     allow(cli).to receive(:red).and_return("")
     allow(cli).to receive(:yellow).and_return("")
-    allow(cli).to receive(:run!)
+    allow(cli).to receive(:destroy_config).and_return(dconfig)
+    allow(dconfig).to receive(:targets).and_return(staging: staging, production: production, local: local)
+    allow(dconfig).to receive(:[]).with(:local).and_return(local)
+    allow(dconfig).to receive(:[]).with(:staging).and_return(staging)
   end
 
-  describe "#destroy" do
-    it "tears down remote, github, and local in order" do
+  describe "full destroy" do
+    before do
+      allow(cli).to receive(:destroy_remote)
+      allow(cli).to receive(:destroy_github)
+      allow(cli).to receive(:destroy_local)
+    end
+
+    it "tears down every site, then github, then the local checkout, in order" do
       expect(cli).to receive(:destroy_remote).ordered
       expect(cli).to receive(:destroy_github).ordered
       expect(cli).to receive(:destroy_local).ordered
       cli.destroy("testproject")
     end
 
-    it "does not prompt for confirmation with --yes" do
-      allow(cli).to receive(:destroy_remote)
-      allow(cli).to receive(:destroy_github)
-      allow(cli).to receive(:destroy_local)
-      expect(cli).not_to receive(:destroy_confirm)
-      cli.destroy("testproject")
+    # A full destroy deletes the checkout, so it cannot be the cwd.
+    it "refuses to run from inside the project" do
+      allow(cli).to receive(:exit).with(1).and_raise(SystemExit)
+      allow(Bard::Config).to receive(:detect_project_name).and_return("testproject")
+      expect(cli).not_to receive(:destroy_github)
+      expect { cli.destroy }.to raise_error(SystemExit)
     end
 
     context "without --yes" do
       let(:cli) { Bard::CLI.new }
 
       it "prompts for confirmation" do
+        allow(cli).to receive(:puts)
+        allow(cli).to receive(:print)
+        allow(cli).to receive(:green).and_return("")
+        allow(cli).to receive(:yellow).and_return("")
         allow(cli).to receive(:destroy_remote)
         allow(cli).to receive(:destroy_github)
         allow(cli).to receive(:destroy_local)
@@ -39,77 +59,81 @@ describe "bard destroy" do
         cli.destroy("testproject")
       end
     end
-
-  end
-
-  describe "#destroy_confirm" do
-    let(:cli) { Bard::CLI.new }
-
-    before do
-      allow(cli).to receive(:puts)
-      allow(cli).to receive(:print)
-      allow(cli).to receive(:red).and_return("")
-      allow(cli).to receive(:yellow).and_return("")
-      cli.instance_variable_set(:@destroy_project_name, "testproject")
-    end
-
-    it "aborts when the typed name does not match" do
-      allow($stdin).to receive(:gets).and_return("nope\n")
-      expect(cli).to receive(:exit).with(1)
-      cli.send(:destroy_confirm)
-    end
-
-    it "proceeds when the typed name matches" do
-      allow($stdin).to receive(:gets).and_return("testproject\n")
-      expect(cli).not_to receive(:exit)
-      cli.send(:destroy_confirm)
-    end
   end
 
   describe "#destroy_remote" do
-    let(:target) { double("production") }
-    let(:dconfig) { double("config") }
+    before { cli.instance_variable_set(:@destroy_project_name, "testproject") }
 
-    before do
-      cli.instance_variable_set(:@destroy_project_name, "testproject")
-      allow(cli).to receive(:destroy_config).and_return(dconfig)
+    it "tears down every ssh-capable target" do
+      other = double("gubs", key: :gubs, path: "Sites/testproject", has_capability?: true)
+      allow(dconfig).to receive(:targets).and_return(staging: staging, local: local, gubs: other)
+      [staging, other].each do |t|
+        allow(t).to receive(:run).and_return("")
+        expect(cli).to receive(:destroy_teardown).with(t, "~/#{t.path}")
+      end
+
+      cli.send(:destroy_remote)
     end
 
-    context "when the target has ssh" do
-      before do
-        allow(dconfig).to receive(:[]).with(:production).and_return(target)
-        allow(target).to receive(:has_capability?).with(:ssh).and_return(true)
-        allow(target).to receive(:key).and_return(:production)
-      end
+    # Without a distinct production these are the same target; tearing it down twice
+    # would run the whole teardown against an already-deleted directory.
+    it "tears the same target down only once when staging and production are identical" do
+      expect(staging).to receive(:run).once.and_return("")
+      expect(cli).to receive(:destroy_teardown).once
 
-      it "runs every SiteRemoval teardown step against the remote target" do
-        Bard::SiteRemoval.new("~/testproject").steps.each do |_, script|
-          expect(target).to receive(:run!).with(script, home: true, quiet: true)
-        end
-
-        cli.send(:destroy_remote)
-      end
+      cli.send(:destroy_remote)
     end
 
-    context "when the target has no ssh capability" do
-      before do
-        allow(dconfig).to receive(:[]).with(:production).and_return(target)
-        allow(target).to receive(:has_capability?).with(:ssh).and_return(false)
+    it "skips targets that have nothing deployed" do
+      allow(staging).to receive(:run).and_return(false)
+      expect(cli).not_to receive(:destroy_teardown)
+
+      cli.send(:destroy_remote)
+    end
+
+    it "ignores targets without ssh" do
+      expect(cli.send(:destroy_targets)).not_to include(local)
+    end
+  end
+
+  describe "--target" do
+    let(:cli) { Bard::CLI.new([], yes: true, target: "staging") }
+
+    it "tears down only that target, leaving github and the checkout alone" do
+      allow(staging).to receive(:run).and_return("")
+      expect(cli).to receive(:destroy_teardown).with(staging, "~/testproject")
+      expect(cli).not_to receive(:destroy_github)
+      expect(cli).not_to receive(:destroy_local)
+
+      cli.destroy("testproject")
+    end
+
+    it "works from inside the project" do
+      allow(Bard::Config).to receive(:detect_project_name).and_return("testproject")
+      allow(staging).to receive(:run).and_return("")
+      allow(cli).to receive(:destroy_teardown)
+      expect(cli).not_to receive(:exit)
+
+      cli.destroy
+    end
+  end
+
+  describe "#destroy_teardown" do
+    before { cli.instance_variable_set(:@destroy_project_name, "testproject") }
+
+    it "sends every SiteRemoval step over the target as plain shell" do
+      Bard::SiteRemoval.new("~/testproject").steps.each do |_, script|
+        expect(staging).to receive(:run!).with(script, home: true, quiet: true)
       end
 
-      it "does nothing" do
-        expect(target).not_to receive(:run!)
-        cli.send(:destroy_remote)
-      end
+      cli.send(:destroy_teardown, staging, "~/testproject")
     end
   end
 
   describe "#destroy_github" do
     let(:github) { double("github") }
 
-    before do
-      cli.instance_variable_set(:@destroy_project_name, "testproject")
-    end
+    before { cli.instance_variable_set(:@destroy_project_name, "testproject") }
 
     it "deletes the github repo" do
       expect(Bard::Github).to receive(:new).with("testproject").and_return(github)
@@ -128,20 +152,10 @@ describe "bard destroy" do
   end
 
   describe "#destroy_local" do
-    let(:local_target) { double("local", key: :local) }
-    let(:dconfig) { double("config") }
+    before { cli.instance_variable_set(:@destroy_project_name, "testproject") }
 
-    before do
-      cli.instance_variable_set(:@destroy_project_name, "testproject")
-      allow(cli).to receive(:destroy_config).and_return(dconfig)
-      allow(dconfig).to receive(:[]).with(:local).and_return(local_target)
-    end
-
-    it "runs every SiteRemoval teardown step against the local project directory" do
-      Bard::SiteRemoval.new("../testproject").steps.each do |_, script|
-        expect(local_target).to receive(:run!).with(script, home: true, quiet: true)
-      end
-
+    it "tears down the local checkout in the parent directory" do
+      expect(cli).to receive(:destroy_teardown).with(local, "../testproject")
       cli.send(:destroy_local)
     end
   end
