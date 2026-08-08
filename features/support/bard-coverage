@@ -5,12 +5,14 @@ require "simplecov"
 SimpleCov.root(root)
 SimpleCov.start do
   command_name "Cucumber (subprocess #{$$})"
-  track_files "lib/**/*.rb"
-  add_filter "spec/"
-  add_filter "features/"
+  cover "lib/**/*.rb"
   coverage_dir "#{root}/coverage"
 end
 
 $LOAD_PATH.unshift("#{root}/lib")
 require "bard/cli"
+# bard-cli discovers plugins from its own gem, the cwd's Gemfile.lock, and the cwd's lib.
+# The acceptance suite runs from a temp project, so none of those find this checkout —
+# load the commands under test explicitly.
+require "bard/plugins/new"
 Bard::CLI.start ARGV

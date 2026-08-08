@@ -1,9 +1,7 @@
 require "simplecov"
 SimpleCov.start do
   command_name "RSpec"
-  track_files "lib/**/*.rb"
-  add_filter "spec/"
-  add_filter "features/"
+  cover "lib/**/*.rb"
 end
 
 require "webmock/rspec"
