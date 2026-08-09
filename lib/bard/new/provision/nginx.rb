@@ -1,3 +1,4 @@
+require "digest"
 require "uri"
 
 # install nginx and configure the app site
@@ -15,7 +16,7 @@ class Bard::Provision::Nginx < Bard::Provision
       ].join("; "), home: true
     end
 
-    if !app_configured?
+    if !app_config_current?
       print " Creating nginx config for app,"
       install_app_config!
     end
@@ -30,8 +31,11 @@ class Bard::Provision::Nginx < Bard::Provision
     provision_server.run "nc -zv localhost 80 2>/dev/null", home: true, quiet: true
   end
 
-  def app_configured?
-    provision_server.run "[ -f /etc/nginx/sites-enabled/#{config.project_name} ]", quiet: true
+  def app_config_current?
+    provision_server.run [
+      "[ -f /etc/nginx/sites-enabled/#{config.project_name} ]",
+      %(echo "#{Digest::SHA256.hexdigest(nginx_config)}  /etc/nginx/sites-available/#{config.project_name}" | sha256sum -c --status),
+    ].join(" && "), quiet: true
   end
 
   private
@@ -46,7 +50,7 @@ class Bard::Provision::Nginx < Bard::Provision
   end
 
   def nginx_config
-    <<~EOF
+    @nginx_config ||= <<~EOF
       upstream puma {
           server 127.0.0.1:3000 fail_timeout=5;
       }
@@ -66,7 +70,7 @@ class Bard::Provision::Nginx < Bard::Provision
               proxy_set_header X-Forwarded-Proto $scheme;
           }
 
-          location ~* \\-[0-9a-f]\\{64\\}\\.(ico|css|js|gif|jpe?g|png|webp)$ {
+          location ~* "-[0-9a-f]{64}\\.(ico|css|js|gif|jpe?g|png|webp)$" {
               access_log off;
               expires max;
               add_header Cache-Control public;
