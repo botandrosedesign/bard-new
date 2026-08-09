@@ -16,8 +16,7 @@ class Bard::Provision::MySQL < Bard::Provision
       %{sudo mysql -e "GRANT ALL PRIVILEGES ON *.* TO '#{deploy_user}'@'localhost'"},
       # Retire the empty-password root: only the OS root user is MySQL root now.
       %{sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket"},
-      %{sudo mysql -e "FLUSH PRIVILEGES"},
-    ].join("; "), home: true
+    ].join(" && "), home: true
 
     puts " ✓"
   end

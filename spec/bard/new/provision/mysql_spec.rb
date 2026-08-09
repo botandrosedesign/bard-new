@@ -49,6 +49,19 @@ describe Bard::Provision::MySQL do
       mysql.call
     end
 
+    it "chains the statements with && and omits the vestigial FLUSH PRIVILEGES" do
+      allow(mysql).to receive(:mysql_responding?).and_return(true)
+
+      expect(provision_server).to receive(:run!).with(
+        a_string_matching(/auth_socket" && sudo mysql/)
+          .and(satisfy("not chain with ;") { |command| !command.include?(";") })
+          .and(satisfy("not flush privileges") { |command| !command.include?("FLUSH PRIVILEGES") }),
+        home: true,
+      )
+
+      mysql.call
+    end
+
     it "prints status messages" do
       allow(mysql).to receive(:mysql_responding?).and_return(true)
 

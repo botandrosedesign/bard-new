@@ -31,13 +31,12 @@ describe Bard::Provision::HTTP do
     end
 
     context "when HTTP test fails" do
-      it "shows failure message after exhausting retries" do
+      it "raises after exhausting retries" do
         allow(http).to receive(:system).and_return(false)
 
         expect(http).to receive(:system).exactly(described_class::RETRIES).times
-        expect(http).to receive(:puts).with(" !!! not serving a rails app from 192.168.1.100")
 
-        http.call
+        expect { http.call }.to raise_error(RuntimeError, "not serving a rails app from 192.168.1.100")
       end
     end
 
@@ -62,7 +61,7 @@ describe Bard::Provision::HTTP do
 
     it "tests the correct URL" do
       expected_command = /curl -sf --resolve example\.com:80:192\.168\.1\.100 http:\/\/example\.com -o \/dev\/null/
-      expect(http).to receive(:system).with(expected_command)
+      expect(http).to receive(:system).with(expected_command).and_return(true)
 
       http.call
     end

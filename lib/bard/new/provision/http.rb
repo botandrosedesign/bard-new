@@ -11,7 +11,7 @@ class Bard::Provision::HTTP < Bard::Provision
     if serving?(target_host)
       puts " ✓"
     else
-      puts " !!! not serving a rails app from #{provision_server.ssh_uri.host}"
+      raise "not serving a rails app from #{provision_server.ssh_uri.host}"
     end
   end
 
