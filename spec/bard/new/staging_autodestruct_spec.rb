@@ -64,9 +64,11 @@ describe Bard::StagingAutodestruct do
       expect(script).to include('[ -n "$newest" ] || exit 0')
     end
 
-    it "embeds the shared SiteRemoval teardown steps for its own site" do
-      Bard::SiteRemoval.new("$HOME/acme", name: "acme").steps.each do |_, cmd|
-        expect(script).to include(cmd)
+    # No output redirects: systemd sends step output to the journal, so a failed
+    # step is visible there instead of vanishing.
+    it "embeds the shared SiteRemoval teardown steps, narrated and unsilenced" do
+      Bard::SiteRemoval.new("$HOME/acme", name: "acme").steps.each do |label, cmd|
+        expect(script).to include(%(echo "bard: #{label}"\n( #{cmd} )\n))
       end
     end
   end

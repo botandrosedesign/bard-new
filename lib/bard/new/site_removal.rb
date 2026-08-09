@@ -4,12 +4,12 @@ module Bard
   # Tears down a single deployed site rooted at `dir`: stops its services, drops
   # its database, removes its nginx site and rvm gemset, and deletes the directory.
   # Shared by `bard destroy` (which runs the steps over a target, remote or local)
-  # and `bard reap` / `bard remove` (which run them locally). Exposed as ordered
-  # [label, shell-command] steps so each caller executes them in its own context.
+  # and the staging auto-destruct script (see Bard::StagingAutodestruct). Exposed
+  # as ordered [label, shell-command] steps so each caller executes them in its
+  # own context.
   class SiteRemoval
-    # `name` is normally derived from `dir`, but both can be given as shell
-    # placeholders (e.g. "$DIR" / "$NAME") to emit these steps into a shell script
-    # that fills them in per site — see Bard::StagingReaper.
+    # `name` is normally derived from `dir`, but Bard::StagingAutodestruct passes
+    # it explicitly alongside a "$HOME/<path>" dir for its rendered script.
     def initialize(dir = Dir.pwd, name: nil)
       @dir = dir.to_s
       @name = name || File.basename(@dir)
@@ -21,16 +21,22 @@ module Bard
         ["dropping database",          drop_database_script],
         ["removing nginx site",        remove_nginx_script],
         ["removing rvm gemset",        remove_gemset_script],
-        ["removing project directory", "rm -rf #{@dir}"],
+        ["removing project directory", "rm -rf #{shell_dir}"],
       ]
     end
 
-    # Run the teardown locally and quietly (used by `bard reap` and `bard remove`).
-    def call
-      steps.each { |_, script| system("( #{script} ) >/dev/null 2>&1") }
-    end
-
     private
+
+    # `bard destroy` passes ~/<name> and the autodestruct script $HOME/<path>; the
+    # prefix must stay bare so the shell expands it, but nothing after it may break out.
+    def shell_dir
+      if @dir.start_with?("~/", "$HOME/")
+        prefix, rest = @dir.split("/", 2)
+        "#{prefix}/#{Shellwords.escape(rest)}"
+      else
+        Shellwords.escape(@dir)
+      end
+    end
 
     def stop_services_script
       data_reap = "bard-data-reap-#{@name}"
@@ -57,7 +63,7 @@ module Bard
     # Login shell + cd so rvm activates the app's own gemset/ruby before rake runs;
     # ambient RAILS_ENV picks the right database. Best-effort (no-op for sqlite).
     def drop_database_script
-      "bash -lc #{Shellwords.escape("cd #{@dir} && bin/rake db:drop")} >/dev/null 2>&1 || true"
+      "bash -lc #{Shellwords.escape("cd #{shell_dir} && bin/rake db:drop")} >/dev/null 2>&1 || true"
     end
 
     def remove_nginx_script
@@ -67,7 +73,7 @@ module Bard
     # Reads the checkout's own ruby so it removes the right gemset regardless of
     # which ruby the site was built with (staging sites vary).
     def remove_gemset_script
-      "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete \"$(cat #{@dir}/.ruby-version 2>/dev/null)@#{@name}\" || true'"
+      "env -i bash -lc 'source ~/.rvm/scripts/rvm && rvm --force gemset delete \"$(cat #{shell_dir}/.ruby-version 2>/dev/null)@#{@name}\" || true'"
     end
   end
 end

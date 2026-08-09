@@ -86,7 +86,8 @@ module Bard
         [ -n "$(find "$newest" -maxdepth 0 -mmin +$IDLE_MIN 2>/dev/null)" ] || exit 0
 
         echo "bard: $NAME has been idle for over #{humanized}; removing it."
-        #{teardown_steps.map { |label, cmd| "# #{label}\n( #{cmd} ) >/dev/null 2>&1" }.join("\n")}
+        # Step output goes to the journal; no set -e so a failed step cannot strand the rest.
+        #{teardown_steps.map { |label, cmd| "echo \"bard: #{label}\"\n( #{cmd} )" }.join("\n")}
       SH
     end
 

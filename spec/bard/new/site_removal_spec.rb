@@ -40,6 +40,15 @@ describe Bard::SiteRemoval do
     expect(script).to include("~/.local/state/bard/acme.synced")
   end
 
+  # Must match bard-cli's data-expiry naming (the counterpart lives in the bard-cli repo).
+  it "pins the artifact names shared with bard-cli's data expiry" do
+    script = script_for("stopping services")
+    expect(script).to include("bard-data-reap-acme.timer")
+    expect(script).to include("bard-data-reap-acme.service")
+    expect(script).to include("~/.local/state/bard/bard-data-reap-acme.sh")
+    expect(script).to include("~/.local/state/bard/acme.synced")
+  end
+
   # These very steps run from inside the autodestruct unit when it fires, so it is
   # disabled without --now: stopping it mid-run would kill the teardown.
   it "tears down the staging autodestruct timer without stopping itself mid-run" do
@@ -71,13 +80,37 @@ describe Bard::SiteRemoval do
     expect(script_for("removing project directory")).to eq("rm -rf /home/www/acme")
   end
 
-  describe "#call" do
-    it "runs every step locally and quietly" do
-      ran = []
-      allow(removal).to receive(:system) { |c| ran << c; true }
-      removal.call
-      expect(ran.size).to eq(5)
-      expect(ran).to all(match(/>\/dev\/null 2>&1\z/))
+  describe "a dir with a space" do
+    subject(:removal) { described_class.new("~/my app", name: "myapp") }
+
+    it "keeps the tilde expandable but escapes the rest" do
+      expect(script_for("removing project directory")).to eq('rm -rf ~/my\ app')
+    end
+
+    it "cannot break out of the db drop command" do
+      expect(script_for("dropping database")).to eq(
+        "bash -lc #{Shellwords.escape('cd ~/my\ app && bin/rake db:drop')} >/dev/null 2>&1 || true"
+      )
+    end
+
+    it "cannot break out of the gemset lookup" do
+      expect(script_for("removing rvm gemset")).to include('cat ~/my\ app/.ruby-version')
+    end
+  end
+
+  describe "a $HOME-prefixed dir" do
+    subject(:removal) { described_class.new("$HOME/my app", name: "myapp") }
+
+    it "keeps $HOME expandable but escapes the rest" do
+      expect(script_for("removing project directory")).to eq('rm -rf $HOME/my\ app')
+    end
+  end
+
+  describe "a dir with no expandable prefix" do
+    subject(:removal) { described_class.new("/home/www/my app", name: "myapp") }
+
+    it "escapes the whole path" do
+      expect(script_for("removing project directory")).to eq('rm -rf /home/www/my\ app')
     end
   end
 end
