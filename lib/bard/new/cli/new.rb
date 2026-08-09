@@ -58,8 +58,13 @@ class Bard::CLI
     def new_build_gem_install(gem_name, version_requirement)
       <<~SH
         gem install #{gem_name} -v "#{version_requirement}" --no-document || exit 1
-        GEM_VERSION=$(gem list #{gem_name} --exact -v "#{version_requirement}" | grep -oP "#{gem_name} \\(\\K[0-9.]+" | head -1)
+        GEM_VERSION=$(#{new_build_gem_version_selection(gem_name, version_requirement)})
       SH
+    end
+
+    def new_build_gem_version_selection(gem_name, version_requirement)
+      # RubyGems 4 ignores -v when filtering `gem list` output, so select via Gem itself
+      %(ruby -e "puts Gem::Specification.find_all_by_name(%q{#{gem_name}}, %q{#{version_requirement}}).map(&:version).max")
     end
 
     def new_build_rails_new

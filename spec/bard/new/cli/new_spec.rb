@@ -1,4 +1,6 @@
 require "spec_helper"
+require "tmpdir"
+require "fileutils"
 
 describe "bard new" do
   let(:cli) { Bard::CLI.new }
@@ -80,6 +82,23 @@ describe "bard new" do
       end
       result = `#{cmd}`.strip
       expect(result).to match(/^2\.\d+\.\d+/)
+    end
+  end
+
+  describe "#new_build_gem_version_selection" do
+    it "picks the newest version satisfying the requirement, not the newest installed" do
+      Dir.mktmpdir do |gem_home|
+        FileUtils.mkdir_p "#{gem_home}/specifications"
+        %w[4.0.16 2.7.2 2.6.2].each do |version|
+          File.write "#{gem_home}/specifications/fakegem-#{version}.gemspec",
+            %(Gem::Specification.new { |s| s.name = "fakegem"; s.version = "#{version}" })
+        end
+        cmd = cli.send(:new_build_gem_version_selection, "fakegem", "~> 2.0")
+        result = Bundler.with_unbundled_env do
+          `env GEM_HOME=#{gem_home} GEM_PATH=#{gem_home} #{cmd}`.strip
+        end
+        expect(result).to eq("2.7.2")
+      end
     end
   end
 end
