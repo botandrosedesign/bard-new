@@ -1,34 +1,67 @@
 name: Publish to GitHub Packages
 on:
-  push:
+  # Chained off CI instead of push so a red master build can never ship. The
+  # job-level `if` checks the conclusion, since "completed" fires on failure too.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [master]
-  workflow_dispatch: # force a publish for the current version (bootstrap, or a missed bump)
+  # Manual escape hatch. Force means: build and push the gem even though tag
+  # v<version> already exists (e.g. the package version was deleted, or a
+  # publish needs repeating); the tag itself is only created if missing.
+  workflow_dispatch:
 
 jobs:
   publish:
+    # Only green push-builds of master publish; guard the event too so a fork
+    # PR from a branch that happens to be named "master" can't trigger a release.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # to push the release tag
       packages: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          fetch-depth: 2
+          # workflow_run checks out the default-branch tip by default — pin to
+          # the exact commit CI just tested. Empty on dispatch → default ref.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: "3.4"
 
-      - name: Publish only when the version changed
+      - name: Publish and tag unless the current version is already tagged
         env:
           GEM_HOST_API_KEY: Bearer ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
+          # Tag existence is the "already published" marker: unlike diffing
+          # version.rb against HEAD~1, it catches bumps buried mid-push, and it
+          # self-heals on re-runs because the tag only lands after a good publish.
+          git fetch --tags --quiet
           curr="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' lib/bard/new/version.rb | head -1)"
-          prev="$(git show HEAD~1:lib/bard/new/version.rb 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-          if [ "$curr" = "$prev" ] && [ "$FORCE" != "true" ]; then
-            echo "bard-new version unchanged ($curr) — skipping publish."
+          if [ -n "$(git tag -l "v$curr")" ] && [ "$FORCE" != "true" ]; then
+            echo "Tag v$curr exists — bard-new $curr is already published. Skipping."
+            exit 0
+          fi
+          echo "Publishing bard-new $curr."
+          gem build bard-new.gemspec
+          # Tolerate "version already exists" (409): pre-tag-era versions and
+          # partial re-runs are already in Packages — continue so the tag lands.
+          if ! output="$(gem push --host "https://rubygems.pkg.github.com/${{ github.repository_owner }}" bard-new-*.gem 2>&1)"; then
+            echo "$output"
+            echo "$output" | grep -Eqi "409|already" || exit 1
+            echo "bard-new $curr is already in Packages — continuing to tag."
           else
-            echo "Publishing bard-new $curr (was ${prev:-none})."
-            gem build bard-new.gemspec
-            gem push --host "https://rubygems.pkg.github.com/${{ github.repository_owner }}" bard-new-*.gem
+            echo "$output"
+          fi
+          if [ -z "$(git tag -l "v$curr")" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "v$curr" -m "bard-new v$curr"
+            git push origin "v$curr"
           fi
