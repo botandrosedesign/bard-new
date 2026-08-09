@@ -20,6 +20,11 @@ file ".gitignore", <<~GITIGNORE
   !/log/.keep
   !/tmp/.keep
 
+  # Ignore pidfiles, but keep the directory.
+  /tmp/pids/*
+  !/tmp/pids/
+  !/tmp/pids/.keep
+
   # Ignore master key for decrypting credentials and more.
   /config/master.key
 
@@ -198,12 +203,12 @@ gsub_file "config/environments/production.rb", /  (config\.logger.+STDOUT.*)$/, 
 
 file "Procfile", "web: bundle exec puma -p 3000\n"
 
+file "tmp/pids/.keep", ""
+
 append_to_file "Rakefile", <<~'RUBY'
 
   task bootstrap: :environment do
-    system "bin/rails db:prepare"
     if Rails.env.production?
-      system "bin/rails assets:precompile"
       app = File.basename(Dir.pwd)
       system "bundle exec foreman export systemd-user --app #{app}"
       system "systemctl --user restart #{app}.target"
