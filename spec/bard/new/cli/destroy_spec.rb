@@ -20,6 +20,10 @@ describe "bard destroy" do
     allow(dconfig).to receive(:targets).and_return(staging: staging, production: production, local: local)
     allow(dconfig).to receive(:[]).with(:local).and_return(local)
     allow(dconfig).to receive(:[]).with(:staging).and_return(staging)
+    allow(File).to receive(:exist?).and_call_original
+    allow(File).to receive(:exist?).with("testproject/bard.rb").and_return(false)
+    allow(File).to receive(:exist?).with("../testproject/bard.rb").and_return(true)
+    allow(File).to receive(:exist?).with("./bard.rb").and_return(true)
   end
 
   describe "full destroy" do
@@ -58,6 +62,42 @@ describe "bard destroy" do
         expect(cli).to receive(:destroy_confirm)
         cli.destroy("testproject")
       end
+    end
+  end
+
+  describe "project directory resolution" do
+    before do
+      allow(cli).to receive(:destroy_remote)
+      allow(cli).to receive(:destroy_github)
+      allow(cli).to receive(:destroy_config).and_call_original
+    end
+
+    it "resolves <name>/ when run from the project's parent directory" do
+      allow(File).to receive(:exist?).with("testproject/bard.rb").and_return(true)
+      expect(Bard::Config).to receive(:new).with("testproject", path: "testproject/bard.rb").and_return(dconfig)
+      expect(cli).to receive(:destroy_teardown).with(local, "testproject")
+
+      cli.destroy("testproject")
+    end
+
+    it "resolves ../<name>/ when run from a sibling project directory" do
+      expect(Bard::Config).to receive(:new).with("testproject", path: "../testproject/bard.rb").and_return(dconfig)
+      expect(cli).to receive(:destroy_teardown).with(local, "../testproject")
+
+      cli.destroy("testproject")
+    end
+
+    # Bard::Config silently falls back to defaults when the path is missing, which
+    # would skip non-default targets and no-op the local rm — never destroy on that.
+    it "aborts before destroying anything when no bard.rb can be found" do
+      allow(File).to receive(:exist?).with("../testproject/bard.rb").and_return(false)
+      allow(cli).to receive(:exit).with(1).and_raise(SystemExit)
+      expect(cli).to receive(:puts).with(/Cannot find/)
+      expect(cli).not_to receive(:destroy_remote)
+      expect(cli).not_to receive(:destroy_github)
+      expect(cli).not_to receive(:destroy_teardown)
+
+      expect { cli.destroy("testproject") }.to raise_error(SystemExit)
     end
   end
 
@@ -116,6 +156,20 @@ describe "bard destroy" do
 
       cli.destroy
     end
+
+    context "with an unknown target" do
+      let(:cli) { Bard::CLI.new([], target: "prodcution") }
+
+      it "aborts before confirmation, listing the available targets" do
+        allow(dconfig).to receive(:[]).with(:prodcution).and_return(nil)
+        allow(cli).to receive(:exit).with(1).and_raise(SystemExit)
+        expect(cli).to receive(:puts).with(/Available targets: staging, production, local/)
+        expect(cli).not_to receive(:destroy_confirm)
+        expect(cli).not_to receive(:destroy_site)
+
+        expect { cli.destroy("testproject") }.to raise_error(SystemExit)
+      end
+    end
   end
 
   describe "#destroy_teardown" do
@@ -152,9 +206,9 @@ describe "bard destroy" do
   end
 
   describe "#destroy_local" do
-    before { cli.instance_variable_set(:@destroy_project_name, "testproject") }
+    before { cli.instance_variable_set(:@destroy_project_dir, "../testproject") }
 
-    it "tears down the local checkout in the parent directory" do
+    it "tears down the resolved project directory" do
       expect(cli).to receive(:destroy_teardown).with(local, "../testproject")
       cli.send(:destroy_local)
     end

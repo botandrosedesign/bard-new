@@ -9,8 +9,10 @@ class Bard::CLI
   def destroy(project_name = nil)
     @destroy_project_name = project_name || Bard::Config.detect_project_name
     @destroy_from_parent = !project_name.nil?
+    destroy_resolve_project_dir
 
     if options[:target]
+      destroy_validate_target
       destroy_confirm unless options[:yes]
       destroy_site destroy_config[options[:target].to_sym]
       puts green("#{@destroy_project_name} removed from #{options[:target]}.")
@@ -31,11 +33,26 @@ class Bard::CLI
   end
 
   no_commands do
+    # `bard destroy foo` works from foo's parent or from a sibling checkout. A missing
+    # bard.rb must abort: Bard::Config silently falls back to a defaults-only config,
+    # which would skip any non-default targets and leave their sites behind.
+    def destroy_resolve_project_dir
+      candidates = @destroy_from_parent ? [@destroy_project_name, "../#{@destroy_project_name}"] : ["."]
+      @destroy_project_dir = candidates.find { |dir| File.exist?("#{dir}/bard.rb") }
+      return if @destroy_project_dir
+      puts red("!!! ") + "Cannot find #{candidates.map { |dir| yellow("#{dir}/bard.rb") }.join(" or ")}."
+      puts "    Refusing to destroy without the project's bard.rb — its non-default targets would survive."
+      exit 1
+    end
+
+    def destroy_validate_target
+      return if destroy_config[options[:target].to_sym]
+      puts red("!!! ") + "Unknown target #{yellow(options[:target])}. Available targets: #{destroy_config.targets.keys.join(", ")}."
+      exit 1
+    end
+
     def destroy_config
-      @destroy_config ||= begin
-        path = @destroy_from_parent ? "../#{@destroy_project_name}/bard.rb" : "bard.rb"
-        Bard::Config.new(@destroy_project_name, path: path)
-      end
+      @destroy_config ||= Bard::Config.new(@destroy_project_name, path: "#{@destroy_project_dir}/bard.rb")
     end
 
     def destroy_confirm
@@ -85,7 +102,7 @@ class Bard::CLI
     end
 
     def destroy_local
-      destroy_teardown(destroy_config[:local], "../#{@destroy_project_name}")
+      destroy_teardown(destroy_config[:local], @destroy_project_dir)
     end
 
     # The servers have no bard install, so the teardown is sent over as plain shell.
